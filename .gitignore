@@ -1,0 +1,8 @@
+**/__pycache__/
+
+data/
+test_output/
+.venv/
+venv/
+.vscode/
+.idea/
