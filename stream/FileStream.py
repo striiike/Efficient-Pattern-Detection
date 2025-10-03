@@ -25,7 +25,8 @@ class FileOutputStream(OutputStream):
         if not os.path.exists(base_path):
             os.makedirs(base_path, exist_ok=True)
         self.__is_async = is_async
-        self.__output_path = os.path.join(base_path, file_name)
+        self.__output_path = os.path.join(base_path, f"matches_{file_name}")
+        self.__output_path_latency = os.path.join(base_path, f"latencies_{file_name}")
         if self.__is_async:
             self.__output_file = open(self.__output_path, 'w')
         else:
