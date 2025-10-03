@@ -10,7 +10,7 @@ from AnalyzeData import analyze_bike_data
 from test.testUtils import DEFAULT_TESTING_EVALUATION_MECHANISM_SETTINGS
 from stream.FileStream import FileOutputStream
 from CEP import CEP
-from bike.BikeStream import BikeCSVInputStream, TestBikeInputStream  # Import from bike_stream.py
+from bike.BikeStream import BikeCSVInputStream, TestBikeInputStream, TimingBikeOutputStream  # Import from bike_stream.py
 from bike.BikeHotPathPattern import (
     create_bike_hot_path_pattern,
     get_pattern_info
@@ -125,14 +125,14 @@ def analyze_real_data(file_path: str, max_events: int = 20):
     os.makedirs(output_dir, exist_ok=True)
 
     safe_name = "real_data".lower().replace(" ", "_").replace("(", "").replace(")", "")
-    output_file = f"{safe_name}_matches.txt"
+    output_file = f"{safe_name}.txt"
     output_file_path = os.path.join(output_dir, output_file)
 
     input_stream = BikeCSVInputStream(file_path, max_events=max_events)
     output_stream = FileOutputStream(output_dir, output_file)
+    timing_output_stream = TimingBikeOutputStream(input_stream, output_stream, enable_timing=False)
 
-
-    execution_time = cep.run(input_stream, output_stream, data_formatter)
+    execution_time = cep.run(input_stream, timing_output_stream, data_formatter)
 
     if os.path.exists(output_file_path):
         with open(output_file_path, 'r') as f:

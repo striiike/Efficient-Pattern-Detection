@@ -20,7 +20,7 @@ from condition.KCCondition import KCIndexCondition
 
 DEFAULT_TARGET_STATIONS = {426, 3002, 462}
 
-def create_bike_hot_path_pattern(pattern_id=1, target_stations=None, time_window_hours=1):
+def create_bike_hot_path_pattern(pattern_id=1, target_stations=None, time_window_hours=1, max_kleene_size=3):
     """
     Create the bike hot path detection pattern.
     
@@ -40,7 +40,7 @@ def create_bike_hot_path_pattern(pattern_id=1, target_stations=None, time_window
         KleeneClosureOperator(
             PrimitiveEventStructure("BikeTrip", "a"),
             min_size=1,  # Reverted: Allow single trips to test time window properly
-            max_size=3  # Reasonable limit to prevent excessive matches
+            max_size=max_kleene_size  # Reasonable limit to prevent excessive matches
         ),
         PrimitiveEventStructure("BikeTrip", "b")
     )
