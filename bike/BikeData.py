@@ -43,11 +43,11 @@ class BikeDataFormatter(DataFormatter):
                 "tripduration": int(row[0]) if row[0].strip() else 0,
                 "starttime": row[1].strip(),
                 "stoptime": row[2].strip(), 
-                "start": int(row[3]) if row[3].strip() else 0,  # start station id
+                "start": int(float(row[3])) if row[3].strip() else 0,  # start station id
                 "start_name": row[4].strip(),
                 "start_lat": float(row[5]) if row[5].strip() else 0.0,
                 "start_lng": float(row[6]) if row[6].strip() else 0.0,
-                "end": int(row[7]) if row[7].strip() else 0,    # end station id  
+                "end": int(float(row[7])) if row[7].strip() else 0,    # end station id
                 "end_name": row[8].strip(),
                 "end_lat": float(row[9]) if row[9].strip() else 0.0,
                 "end_lng": float(row[10]) if row[10].strip() else 0.0,

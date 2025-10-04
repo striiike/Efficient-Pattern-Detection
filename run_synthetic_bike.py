@@ -1,0 +1,221 @@
+import argparse
+import os
+import time
+from pathlib import Path
+
+from CEP import CEP
+
+from bike.BikeData import BikeDataFormatter
+from bike.BikeHotPathPattern import (
+    create_bike_hot_path_pattern,
+    create_fixed_length_pattern,
+)
+from bike.BikeStream import TimingBikeInputStream, TimingBikeOutputStream
+from evaluation.metrics import summary, write_latency_csv
+from evaluation.overload import OverloadDetector
+from evaluation.recall import recall as compute_recall, write_projection_csv
+
+OUTPUT_DIR = Path("bike/test_output")
+OUTPUT_BASENAME = "synthetic_hot_path"
+
+DEFAULT_FIXED_LENGTH = 3
+DEFAULT_KLEENE_MAX = 2
+DEFAULT_TARGET_STATIONS = {426, 3002, 462}
+DEFAULT_TIME_WINDOW_HOURS = 1
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return val.lower() not in {"0", "false", "no"}
+
+
+def _clamp_01(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run synthetic bike workload with optional shedding and metrics logging.")
+    parser.add_argument("--shed", dest="shed", action="store_true", help="Enable load shedding")
+    parser.add_argument("--no-shed", dest="shed", action="store_false", help="Disable load shedding")
+    parser.add_argument("--target-latency-ms", type=float, help="Override overload target in milliseconds")
+    parser.add_argument("--drop-prob", type=float, help="Base drop probability when shedding")
+    parser.add_argument("--sleep-ms", type=float, help="Per-event sleep in milliseconds")
+    parser.add_argument("--burst-every", type=int, help="Sleep extra every N events")
+    parser.add_argument("--burst-sleep", type=float, help="Additional sleep (ms) when burst trigger hits")
+    parser.add_argument("--latency-csv", help="Path to latency CSV output")
+    parser.add_argument("--projections-csv", help="Path to projection CSV output")
+    parser.add_argument("--baseline-projections", help="Path to baseline projection CSV for recall calculation")
+    parser.add_argument("--kleene", action="store_true", help="Use Kleene pattern instead of fixed sequence")
+    parser.add_argument("--kleene-max", type=int, default=DEFAULT_KLEENE_MAX, help="Kleene max size (default: %(default)s)")
+    parser.add_argument("--fixed-length", type=int, default=DEFAULT_FIXED_LENGTH, help="Fixed sequence length when not using kleene")
+    parser.add_argument("--max-events", type=int, help="Limit number of synthetic events (None = all)")
+    parser.set_defaults(shed=None)
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    baseline_p50_ms = float(os.environ.get("BIKE_BASELINE_P50_MS", "50"))
+    default_target = baseline_p50_ms * 0.5
+    env_target = float(os.environ.get("BIKE_OVERLOAD_TARGET_MS", str(default_target)))
+    target_latency_ms = args.target_latency_ms if args.target_latency_ms is not None else env_target
+
+    env_shed = _env_bool("BIKE_SHED_ENABLED", True)
+    shed_enabled = env_shed if args.shed is None else args.shed
+
+    env_drop_prob = _clamp_01(float(os.environ.get("BIKE_BASE_DROP_PROB", "0.0")))
+    drop_prob = _clamp_01(args.drop_prob) if args.drop_prob is not None else env_drop_prob
+
+    env_sleep_ms = float(os.environ.get("BIKE_SLEEP_MS", "0.0"))
+    sleep_ms = args.sleep_ms if args.sleep_ms is not None else env_sleep_ms
+
+    env_burst_every = int(os.environ.get("BIKE_BURST_EVERY", "0"))
+    burst_every = args.burst_every if args.burst_every is not None else env_burst_every
+
+    env_burst_sleep = float(os.environ.get("BIKE_BURST_SLEEP_MS", "0.0"))
+    burst_sleep_ms = args.burst_sleep if args.burst_sleep is not None else env_burst_sleep
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    matches_path = OUTPUT_DIR / f"matches_{OUTPUT_BASENAME}"
+    latency_path = OUTPUT_DIR / f"latencies_{OUTPUT_BASENAME}"
+    for path in (matches_path, latency_path):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
+    inp = TimingBikeInputStream(
+        file_path=None,
+        max_events=args.max_events,
+        use_test_data=True,
+        enable_timing=True,
+        shed_when_overloaded=shed_enabled,
+        base_drop_prob=drop_prob,
+        event_sleep_ms=sleep_ms,
+        burst_every=burst_every,
+        burst_sleep_ms=burst_sleep_ms,
+    )
+    out = TimingBikeOutputStream(
+        inp,
+        base_path=str(OUTPUT_DIR),
+        file_name=OUTPUT_BASENAME,
+        enable_timing=True,
+    )
+
+    overload_detector = OverloadDetector(target_latency_ms=target_latency_ms)
+    out.overload_detector = overload_detector
+    inp.overload_detector = overload_detector
+
+    if args.kleene:
+        pattern = create_bike_hot_path_pattern(
+            target_stations=DEFAULT_TARGET_STATIONS,
+            time_window_hours=DEFAULT_TIME_WINDOW_HOURS,
+            max_kleene_size=args.kleene_max,
+        )
+    else:
+        pattern = create_fixed_length_pattern(sequence_length=args.fixed_length)
+
+    engine = CEP([pattern])
+
+    start_ts = time.perf_counter()
+    engine.run(inp, out, BikeDataFormatter())
+    duration_s = time.perf_counter() - start_ts
+
+    if overload_detector:
+        print(f"\nOverload target latency: {target_latency_ms:.2f} ms (baseline p50 {baseline_p50_ms:.2f} ms)")
+        detection_latency = overload_detector.detection_latency_ms()
+        if detection_latency is not None:
+            print(f"Detection latency: {detection_latency:.2f} ms")
+        else:
+            print("Detection latency: (no overload detected)")
+        print(f"Overloaded at completion: {overload_detector.overloaded}")
+
+    if getattr(inp, "shed_when_overloaded", False):
+        total_seen = getattr(inp, "total_events_seen", 0)
+        dropped = getattr(inp, "dropped_events", 0)
+        if total_seen:
+            drop_pct = (dropped / total_seen) * 100.0
+            print(f"Events dropped: {dropped} / {total_seen} ({drop_pct:.2f}%)")
+        else:
+            print("Events dropped: 0 / 0 (0.00%)")
+
+    processed_events = getattr(inp, "event_count", 0)
+    matches = len(getattr(out, "matches", []))
+    delays_ms = [m.get("match_processing_delay_ms", 0.0) for m in out.matches if m.get("match_processing_delay_ms", 0.0) > 0]
+    projections = {m.get("projection") for m in out.matches if m.get("projection")}
+
+    throughput = processed_events / duration_s if duration_s > 0 else 0.0
+    recall_proxy = (matches / processed_events) if processed_events else 0.0
+
+    latency_csv = args.latency_csv or str(OUTPUT_DIR / f"latency_samples_{'shed' if shed_enabled else 'baseline'}_{OUTPUT_BASENAME}.csv")
+    write_latency_csv(latency_csv, delays_ms)
+
+    projections_csv = args.projections_csv or str(OUTPUT_DIR / f"projections_{'shed' if shed_enabled else 'baseline'}_{OUTPUT_BASENAME}.csv")
+    write_projection_csv(projections_csv, projections)
+
+    recall_value = None
+    if args.baseline_projections:
+        baseline_path = Path(args.baseline_projections)
+        if baseline_path.exists():
+            try:
+                recall_value = compute_recall(str(baseline_path), projections_csv)
+                print(f"\nRecall vs baseline: {recall_value:.3f}")
+            except Exception as exc:
+                print(f"\nRecall calculation failed: {exc}")
+        else:
+            print(f"\nBaseline projections file not found: {baseline_path}")
+
+    stats = summary(delays_ms)
+    if stats:
+        print("\nLatency summary (ms):")
+        for key in ("count", "p50", "p95", "avg", "min", "max"):
+            if key in stats:
+                print(f"  {key:>5}: {stats[key]:.2f}")
+    else:
+        print("\nNo latency samples recorded.")
+
+    print("\nRun metrics:")
+    print(f"  Throughput: {throughput:.2f} events/s")
+    print(f"  Matches:    {matches}")
+    print(f"  Recall*:    {recall_proxy:.3f} (matches/processed events)")
+    if recall_value is not None:
+        print(f"  Recall vs baseline: {recall_value:.3f}")
+    print(f"  Latency CSV: {latency_csv}")
+    print(f"  Projections CSV: {projections_csv}")
+
+    try:
+        print(f"\nMatches captured in memory: {len(out.matches)}")
+    except Exception:
+        print("\nMatches captured in memory: (not available on this stream)")
+
+    if matches_path.exists():
+        try:
+            content = matches_path.read_text(encoding="utf-8")
+            print(f"Output file: {matches_path}")
+            print(f"Output size: {len(content)} bytes")
+            print("Preview (first 400 chars):")
+            print(content[:400] if content else "(empty file)")
+        except Exception as exc:
+            print(f"Could not read {matches_path}: {exc}")
+    else:
+        print("Matches file not found (no matches -> file may not be created).")
+
+    if latency_path.exists():
+        print(f"Latency file: {latency_path}")
+    else:
+        print("Latency file not created (it appears only when at least one match is found).")
+
+    print("\nDone.")
+    print("Open:")
+    print(f" - {matches_path}")
+    print(f" - {latency_path} (created only if there were matches)")
+    print(f" - {latency_csv}")
+    print(f" - {projections_csv}")
+
+
+if __name__ == "__main__":
+    main()

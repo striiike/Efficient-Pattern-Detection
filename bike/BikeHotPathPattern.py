@@ -114,10 +114,10 @@ def create_bike_hot_path_pattern(pattern_id=1, target_stations=None, time_window
     conditions.append(time_span_constraint)
 
 
-    # Condition 6: a[last].end = b.end (the last trip in a[] and b is the final trip)
+    # Condition 6: a[last].end = b.start 
     same_bike_final = EqCondition(
         Variable("a", lambda events: events[-1]["end"] if events else None),
-        Variable("b", lambda event: event["end"])
+        Variable("b", lambda event: event["start"])
     )
     conditions.append(same_bike_final)
     

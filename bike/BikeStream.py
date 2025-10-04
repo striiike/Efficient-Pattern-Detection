@@ -5,6 +5,7 @@ Creates input streams for bike trip pattern testing with timing measurement capa
 
 import csv
 import time
+import random
 from datetime import datetime, timedelta
 from stream.FileStream import FileOutputStream
 from stream.Stream import InputStream, OutputStream
@@ -143,13 +144,31 @@ class BikeCSVInputStream(InputStream):
 TestBikeInputStream = BikeCSVInputStream
 
 class TimingBikeInputStream(BikeCSVInputStream):
-    def __init__(self, file_path: str = None, max_events: int = None, use_test_data: bool = False, enable_timing: bool = True):
+    def __init__(self, file_path: str = None, max_events: int = None, use_test_data: bool = False, enable_timing: bool = True, shed_when_overloaded: bool = False, base_drop_prob: float = 0.0, event_sleep_ms: float = 0.0, burst_every: int = 0, burst_sleep_ms: float = 0.0):
         super().__init__(file_path, max_events, use_test_data)
+        if not 0.0 <= base_drop_prob <= 1.0:
+            raise ValueError('base_drop_prob must be between 0 and 1')
+        if event_sleep_ms < 0.0:
+            raise ValueError('event_sleep_ms cannot be negative')
+        if burst_every < 0:
+            raise ValueError('burst_every cannot be negative')
+        if burst_sleep_ms < 0.0:
+            raise ValueError('burst_sleep_ms cannot be negative')
+
         self.enable_timing = enable_timing
         self.system_start_time = None
         self.event_count = 0
         self.event_timings = []
         self.event_processing_times = {}  # Store when each event was processed
+        self.shed_when_overloaded = shed_when_overloaded
+        self.base_drop_prob = base_drop_prob
+        self.event_sleep_ms = event_sleep_ms
+        self.burst_every = burst_every
+        self.burst_sleep_ms = burst_sleep_ms
+        self.overload_detector = None  # Shared reference set by runner when load shedding is active
+        self.dropped_events = 0
+        self.total_events_seen = 0
+        self.last_drop_probability = 0.0
 
     def __iter__(self):
         """Iterate through events while optionally measuring timing."""
@@ -164,7 +183,39 @@ class TimingBikeInputStream(BikeCSVInputStream):
             event = self._stream.get()
             if event is None:  # Handle end of stream
                 break
-                
+
+            self.total_events_seen += 1
+            drop_probability = 0.0
+
+            if (
+                self.shed_when_overloaded
+                and self.overload_detector
+                and getattr(self.overload_detector, 'overloaded', False)
+            ):
+                ema_latency = getattr(self.overload_detector, 'ema_latency', None)
+                target_latency = getattr(self.overload_detector, 'target_latency_ms', 0.0) or 0.0
+                overshoot = 0.0
+                if ema_latency is not None:
+                    denominator = max(1.0, target_latency) if target_latency is not None else 1.0
+                    overshoot = max(0.0, (ema_latency - target_latency) / denominator)
+                drop_probability = min(0.9, self.base_drop_prob + 0.5 * overshoot)
+                if random.random() < drop_probability:
+                    self.dropped_events += 1
+                    self.last_drop_probability = drop_probability
+                    continue
+
+            self.last_drop_probability = drop_probability
+
+            if self.event_sleep_ms > 0.0 or (self.burst_every and self.burst_sleep_ms > 0.0):
+                sleep_seconds = 0.0
+                if self.event_sleep_ms > 0.0:
+                    sleep_seconds += self.event_sleep_ms / 1000.0
+                if self.burst_every and self.burst_sleep_ms > 0.0:
+                    if self.total_events_seen % self.burst_every == 0:
+                        sleep_seconds += self.burst_sleep_ms / 1000.0
+                if sleep_seconds > 0.0:
+                    time.sleep(sleep_seconds)
+
             if self.enable_timing:
                 current_time = time.perf_counter()
                 gap_ms = (current_time - self.system_start_time) * 1000
@@ -245,7 +296,8 @@ class TimingBikeOutputStream(FileOutputStream):
         # Extract actual start time from PatternMatch
         match_start_times = []
         match_info = ""
-        match_processing_delay = 0
+        match_processing_delay_ms = 0.0
+        match_projection = None
         
         try:
             # Use regex to extract times and bike info from PatternMatch string representation
@@ -273,7 +325,9 @@ class TimingBikeOutputStream(FileOutputStream):
                                 earliest_event_processing_time = event_processing_time
                 
                 if earliest_event_processing_time != float('inf'):
-                    match_processing_delay = match_captured_time - earliest_event_processing_time
+                    match_processing_delay_ms = match_captured_time - earliest_event_processing_time
+                    if hasattr(self, 'overload_detector') and self.overload_detector:
+                        self.overload_detector.note_latency(match_processing_delay_ms)
                 
                 # Get unique stations in sequence
                 stations = []
@@ -292,6 +346,15 @@ class TimingBikeOutputStream(FileOutputStream):
                 time_range = f"{time_matches[0][11:19]} to {time_matches[-1][11:19]}" if len(time_matches) > 1 else time_matches[0][11:19]
                 
                 match_info = f"Bike {bike_id}: {station_path} ({time_range})"
+
+                if start_matches and end_matches:
+                    try:
+                        a1_start = int(start_matches[0])
+                        b_end = int(end_matches[-1])
+                        last_a_end = int(end_matches[-2]) if len(end_matches) >= 2 else b_end
+                        match_projection = (a1_start, last_a_end, b_end)
+                    except ValueError:
+                        match_projection = None
             else:
                 match_info = f"PatternMatch with {len(hasattr(item, 'events') and item.events or [])} events"
                 
@@ -302,11 +365,12 @@ class TimingBikeOutputStream(FileOutputStream):
             'match_number': len(self.matches),
             'gap_from_first_match_ms': gap_ms,
             'match_captured_time_ms': match_captured_time,
-            'match_processing_delay_ms': match_processing_delay,
+            'match_processing_delay_ms': match_processing_delay_ms,
             'timestamp': datetime.now(),
             'data': item,
             'match_start_times': match_start_times,
-            'match_info': match_info
+            'match_info': match_info,
+            'projection': match_projection
         })
     
     def close(self):
