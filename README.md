@@ -83,13 +83,13 @@ All commands below use 1000 events. The workflow consists of:
 #### Kleene (+) Correct Path Detection
 
 ```bash
-python run_synthetic_bike.py --no-shed --kleene --kleene-max 3
+python RunSyntheticBike.py --no-shed --kleene --kleene-max 3
 ```
 
 #### Fixed-Length Control (e.g., length 3)
 
 ```bash
-python run_synthetic_bike.py --no-shed --fixed-length 3
+python RunSyntheticBike.py --no-shed --fixed-length 3
 ```
 
 **Expected behavior:** Valid chains to target stations (426/3002/462) within 1h produce matches; invalid cases (wrong bike, broken chaining, window violations) do not.
@@ -104,7 +104,7 @@ This produces:
 - Counters CSV (ingested/forwarded/dropped/matches)
 
 ```bash
-python run_bike_csv.py \
+python RunBikeCSV.py \
   --no-shed \
   --csv-path data/201804-citibike-tripdata_2.csv \
   --max-events 1000 \
@@ -132,7 +132,7 @@ P50=400
 #### 10% Cap
 
 ```bash
-python run_bike_csv.py --shed --shed-mode event \
+python RunBikeCSV.py --shed --shed-mode event \
   --csv-path data/201804-citibike-tripdata_2.csv \
   --max-events 1000 \
   --kleene-max 3 \
@@ -147,7 +147,7 @@ EOF
 #### 30% Cap
 
 ```bash
-python run_bike_csv.py --shed --shed-mode event \
+python RunBikeCSV.py --shed --shed-mode event \
   --csv-path data/201804-citibike-tripdata_2.csv \
   --max-events 1000 \
   --kleene-max 3 \
@@ -162,7 +162,7 @@ EOF
 #### 50% Cap
 
 ```bash
-python run_bike_csv.py --shed --shed-mode event \
+python RunBikeCSV.py --shed --shed-mode event \
   --csv-path data/201804-citibike-tripdata_2.csv \
   --max-events 1000 \
   --kleene-max 3 \
@@ -177,7 +177,7 @@ EOF
 #### 70% Cap
 
 ```bash
-python run_bike_csv.py --shed --shed-mode event \
+python RunBikeCSV.py --shed --shed-mode event \
   --csv-path data/201804-citibike-tripdata_2.csv \
   --max-events 1000 \
   --kleene-max 3 \
@@ -192,7 +192,7 @@ EOF
 #### 90% Cap
 
 ```bash
-python run_bike_csv.py --shed --shed-mode event \
+python RunBikeCSV.py --shed --shed-mode event \
   --csv-path data/201804-citibike-tripdata_2.csv \
   --max-events 1000 \
   --kleene-max 3 \
@@ -222,7 +222,7 @@ EOF
 This showcases state-aware shedding: under overload, the engine shrinks max Kleene length to control partial-state explosion, then recovers when load drops.
 
 ```bash
-python run_bike_csv.py --shed --shed-mode hybrid \
+python RunBikeCSV.py --shed --shed-mode hybrid \
   --csv-path data/201804-citibike-tripdata_2.csv \
   --max-events 1000 \
   --kleene-max 4 \
@@ -246,7 +246,7 @@ EOF
 Inject periodic stalls to simulate bursty conditions and observe detection latency + p95 improvements under shedding.
 
 ```bash
-python run_bike_csv.py --shed --shed-mode event \
+python RunBikeCSV.py --shed --shed-mode event \
   --csv-path data/201804-citibike-tripdata_2.csv \
   --max-events 1000 \
   --kleene-max 3 \
@@ -269,7 +269,7 @@ EOF
 Run a baseline and sweep 10/30/50/70/90% automatically with outputs in a dedicated directory.
 
 ```bash
-python sweeps.py \
+python Sweeps.py \
   --csv-path data/201804-citibike-tripdata_2.csv \
   --max-events 1000 \
   --caps 0.1,0.3,0.5,0.7,0.9 \

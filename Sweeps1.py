@@ -12,8 +12,8 @@ from CEP import CEP
 from bike.BikeData import BikeDataFormatter
 from bike.BikeHotPathPattern import create_bike_hot_path_pattern
 from bike.BikeStream import TimingBikeInputStream, TimingBikeOutputStream
-from evaluation.metrics import summary
-from evaluation.overload import OverloadDetector
+from evaluation.Metrics import summary
+from evaluation.Overload import OverloadDetector
 
 Projection = Tuple[int, int, int]
 COUNTER_KEYS = ('events_ingested', 'events_dropped', 'matches_completed', 'partial_pruned', 'partial_evicted')

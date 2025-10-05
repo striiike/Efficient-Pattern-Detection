@@ -7,21 +7,27 @@ from pathlib import Path
 from CEP import CEP
 
 from bike.BikeData import BikeDataFormatter
-from bike.BikeHotPathPattern import create_bike_hot_path_pattern
+from bike.BikeHotPathPattern import (
+    create_bike_hot_path_pattern,
+    create_fixed_length_pattern,
+)
 from bike.BikeStream import TimingBikeInputStream, TimingBikeOutputStream
-from evaluation.metrics import (
+from evaluation.Metrics import (
     format_counters,
     summary,
     write_counters_csv,
     write_latency_csv,
 )
-from evaluation.overload import OverloadDetector
-from evaluation.recall import recall as compute_recall, write_projection_csv
+from evaluation.Overload import OverloadDetector
+from evaluation.Recall import recall as compute_recall, write_projection_csv
 
-CSV_PATH_DEFAULT = "data/201804-citibike-tripdata_2.csv"
-MAX_EVENTS_DEFAULT = 1000
 OUTPUT_DIR = Path("bike/test_output")
-OUTPUT_NAME = "csv_hot_path"
+OUTPUT_BASENAME = "synthetic_hot_path"
+
+DEFAULT_FIXED_LENGTH = 3
+DEFAULT_KLEENE_MAX = 2
+DEFAULT_TARGET_STATIONS = {426, 3002, 462}
+DEFAULT_TIME_WINDOW_HOURS = 1
 COUNTER_KEYS = (
     'events_ingested',
     'events_dropped',
@@ -44,17 +50,12 @@ def _clamp_01(value: float) -> float:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run bike CSV pipeline with optional overload shedding and metrics logging."
+        description="Run synthetic bike workload with optional shedding and metrics logging."
     )
-    parser.add_argument("--csv-path", default=CSV_PATH_DEFAULT, help="Input CSV path (default: %(default)s)")
-    parser.add_argument("--max-events", type=int, default=MAX_EVENTS_DEFAULT, help="Maximum events to consume (default: %(default)s)")
     parser.add_argument("--shed", dest="shed", action="store_true", help="Enable load shedding")
     parser.add_argument("--no-shed", dest="shed", action="store_false", help="Disable load shedding")
     parser.add_argument("--shed-mode", choices=["event", "hybrid"], default="event",
                         help="'event' = drop input events; 'hybrid' = also shrink Kleene cap under load")
-    parser.add_argument("--kleene-max", type=int, default=3, help="Maximum Kleene length for runs (default: %(default)s)")
-    parser.add_argument("--time-window-hours", type=float, default=1.0, help="Time window in hours for the pattern (default: %(default)s)")
-    parser.add_argument("--target-stations", type=str, help="Comma-separated list of target station IDs for b.end")
     parser.add_argument("--target-latency-ms", type=float, help="Override overload target in milliseconds")
     parser.add_argument("--drop-prob", type=float, help="Base drop probability when shedding")
     parser.add_argument("--sleep-ms", type=float, help="Per-event sleep in milliseconds")
@@ -63,20 +64,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--latency-csv", help="Path to latency CSV output")
     parser.add_argument("--projections-csv", help="Path to projection CSV output")
     parser.add_argument("--baseline-projections", help="Path to baseline projection CSV for recall calculation")
+    parser.add_argument("--kleene", action="store_true", help="Use Kleene pattern instead of fixed sequence")
+    parser.add_argument("--kleene-max", type=int, default=DEFAULT_KLEENE_MAX, help="Kleene max size (default: %(default)s)")
+    parser.add_argument("--fixed-length", type=int, default=DEFAULT_FIXED_LENGTH, help="Fixed sequence length when not using Kleene")
+    parser.add_argument("--max-events", type=int, help="Limit number of synthetic events (None = all)")
     parser.set_defaults(shed=None)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-
-    # Parse target stations if provided
-    target_stations = {426, 3002, 462}
-    if args.target_stations:
-        try:
-            target_stations = {int(s.strip()) for s in args.target_stations.split(',') if s.strip()}
-        except ValueError:
-            print('Warning: could not parse --target-stations; using defaults {426,3002,462}')
 
     baseline_p50_ms = float(os.environ.get("BIKE_BASELINE_P50_MS", "50"))
     default_target = baseline_p50_ms * 0.5
@@ -102,10 +99,18 @@ def main() -> None:
     run_counters = Counter({key: 0 for key in COUNTER_KEYS})
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    matches_path = OUTPUT_DIR / f"matches_{OUTPUT_BASENAME}"
+    latency_path = OUTPUT_DIR / f"latencies_{OUTPUT_BASENAME}"
+    for path in (matches_path, latency_path):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+
     inp = TimingBikeInputStream(
-        file_path=args.csv_path,
+        file_path=None,
         max_events=args.max_events,
-        use_test_data=False,
+        use_test_data=True,
         enable_timing=True,
         shed_when_overloaded=shed_enabled,
         base_drop_prob=drop_prob,
@@ -118,7 +123,7 @@ def main() -> None:
     out = TimingBikeOutputStream(
         inp,
         base_path=str(OUTPUT_DIR),
-        file_name=OUTPUT_NAME,
+        file_name=OUTPUT_BASENAME,
         enable_timing=True,
     )
 
@@ -126,12 +131,17 @@ def main() -> None:
     out.overload_detector = overload_detector
     inp.overload_detector = overload_detector
 
-    pattern, pattern_cfg = create_bike_hot_path_pattern(
-        target_stations=target_stations,
-        time_window_hours=args.time_window_hours,
-        max_kleene_size=args.kleene_max,
-    )
-    if hasattr(inp, 'pattern_config'):
+    pattern_cfg = None
+    if args.kleene:
+        pattern, pattern_cfg = create_bike_hot_path_pattern(
+            target_stations=DEFAULT_TARGET_STATIONS,
+            time_window_hours=DEFAULT_TIME_WINDOW_HOURS,
+            max_kleene_size=args.kleene_max,
+        )
+    else:
+        pattern = create_fixed_length_pattern(sequence_length=args.fixed_length)
+
+    if pattern_cfg is not None and hasattr(inp, 'pattern_config'):
         inp.pattern_config = pattern_cfg
         pattern_cfg.reset()
 
@@ -142,7 +152,7 @@ def main() -> None:
     duration_s = time.perf_counter() - start_ts
 
     if overload_detector:
-        print(f"\nOverload target latency: {target_latency_ms:.2f} ms")
+        print(f"\nOverload target latency: {target_latency_ms:.2f} ms (baseline p50 {baseline_p50_ms:.2f} ms)")
         detection_latency = overload_detector.detection_latency_ms()
         if detection_latency is not None:
             print(f"Detection latency: {detection_latency:.2f} ms")
@@ -167,13 +177,13 @@ def main() -> None:
     throughput = processed_events / duration_s if duration_s > 0 else 0.0
     recall_proxy = (matches / processed_events) if processed_events else 0.0
 
-    latency_csv = args.latency_csv or str(OUTPUT_DIR / f"latency_samples_{'shed' if shed_enabled else 'baseline'}_{OUTPUT_NAME}.csv")
+    latency_csv = args.latency_csv or str(OUTPUT_DIR / f"latency_samples_{'shed' if shed_enabled else 'baseline'}_{OUTPUT_BASENAME}.csv")
     write_latency_csv(latency_csv, delays_ms)
 
-    projections_csv = args.projections_csv or str(OUTPUT_DIR / f"projections_{'shed' if shed_enabled else 'baseline'}_{OUTPUT_NAME}.csv")
+    projections_csv = args.projections_csv or str(OUTPUT_DIR / f"projections_{'shed' if shed_enabled else 'baseline'}_{OUTPUT_BASENAME}.csv")
     write_projection_csv(projections_csv, projections)
 
-    counters_csv = str(OUTPUT_DIR / f"counters_{'shed' if shed_enabled else 'baseline'}_{OUTPUT_NAME}.csv")
+    counters_csv = str(OUTPUT_DIR / f"counters_{'shed' if shed_enabled else 'baseline'}_{OUTPUT_BASENAME}.csv")
     write_counters_csv(counters_csv, run_counters)
 
     recall_value = None
@@ -211,10 +221,32 @@ def main() -> None:
     print("\nCounters:")
     print("  " + format_counters({key: run_counters.get(key, 0) for key in COUNTER_KEYS}))
 
+    try:
+        print(f"\nMatches captured in memory: {len(out.matches)}")
+    except Exception:
+        print("\nMatches captured in memory: (not available on this stream)")
+
+    if matches_path.exists():
+        try:
+            content = matches_path.read_text(encoding="utf-8")
+            print(f"Output file: {matches_path}")
+            print(f"Output size: {len(content)} bytes")
+            print("Preview (first 400 chars):")
+            print(content[:400] if content else "(empty file)")
+        except Exception as exc:
+            print(f"Could not read {matches_path}: {exc}")
+    else:
+        print("Matches file not found (no matches -> file may not be created).")
+
+    if latency_path.exists():
+        print(f"Latency file: {latency_path}")
+    else:
+        print("Latency file not created (it appears only when at least one match is found).")
+
     print("\n✅ Done.")
     print("Open:")
-    print(f" - {OUTPUT_DIR / f'matches_{OUTPUT_NAME}.txt'}")
-    print(f" - {OUTPUT_DIR / f'latencies_{OUTPUT_NAME}.txt'}")
+    print(f" - {matches_path}")
+    print(f" - {latency_path} (created only if there were matches)")
     print(f" - {counters_csv}")
     print(f" - {latency_csv}")
     print(f" - {projections_csv}")
