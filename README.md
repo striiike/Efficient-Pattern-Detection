@@ -51,7 +51,7 @@ source .venv/bin/activate
 .\.venv\Scripts\Activate.ps1
 
 # Install dependencies
-pip install -r requirements.txt
+# pip install ...
 ```
 
 ### 2. Prepare Dataset
