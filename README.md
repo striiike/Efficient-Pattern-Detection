@@ -20,7 +20,6 @@ RETURN (a[1].start, a[i].end, b.end)
 ```
 
 **Robustness enforced in code:**
-- `a[last].end = b.end`
 - `b.end_time - a[1].start_time ≤ 1h` (and the engine's 1h window)
 
 > **Note:** OpenCEP does not expose `RETURN` directly, so we compute the projection triple `(a1_start, last_a_end, b_end)` in the output stream for recall evaluation.
@@ -52,7 +51,7 @@ source .venv/bin/activate
 .\.venv\Scripts\Activate.ps1
 
 # Install dependencies
-pip install -r requirements.txt
+# pip install ...
 ```
 
 ### 2. Prepare Dataset
