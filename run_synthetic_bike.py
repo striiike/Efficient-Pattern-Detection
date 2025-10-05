@@ -1,6 +1,7 @@
 import argparse
 import os
 import time
+from collections import Counter
 from pathlib import Path
 
 from CEP import CEP
@@ -11,7 +12,12 @@ from bike.BikeHotPathPattern import (
     create_fixed_length_pattern,
 )
 from bike.BikeStream import TimingBikeInputStream, TimingBikeOutputStream
-from evaluation.metrics import summary, write_latency_csv
+from evaluation.metrics import (
+    format_counters,
+    summary,
+    write_counters_csv,
+    write_latency_csv,
+)
 from evaluation.overload import OverloadDetector
 from evaluation.recall import recall as compute_recall, write_projection_csv
 
@@ -22,6 +28,13 @@ DEFAULT_FIXED_LENGTH = 3
 DEFAULT_KLEENE_MAX = 2
 DEFAULT_TARGET_STATIONS = {426, 3002, 462}
 DEFAULT_TIME_WINDOW_HOURS = 1
+COUNTER_KEYS = (
+    'events_ingested',
+    'events_dropped',
+    'matches_completed',
+    'partial_pruned',
+    'partial_evicted',
+)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -36,9 +49,13 @@ def _clamp_01(value: float) -> float:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run synthetic bike workload with optional shedding and metrics logging.")
+    parser = argparse.ArgumentParser(
+        description="Run synthetic bike workload with optional shedding and metrics logging."
+    )
     parser.add_argument("--shed", dest="shed", action="store_true", help="Enable load shedding")
     parser.add_argument("--no-shed", dest="shed", action="store_false", help="Disable load shedding")
+    parser.add_argument("--shed-mode", choices=["event", "hybrid"], default="event",
+                        help="'event' = drop input events; 'hybrid' = also shrink Kleene cap under load")
     parser.add_argument("--target-latency-ms", type=float, help="Override overload target in milliseconds")
     parser.add_argument("--drop-prob", type=float, help="Base drop probability when shedding")
     parser.add_argument("--sleep-ms", type=float, help="Per-event sleep in milliseconds")
@@ -49,7 +66,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--baseline-projections", help="Path to baseline projection CSV for recall calculation")
     parser.add_argument("--kleene", action="store_true", help="Use Kleene pattern instead of fixed sequence")
     parser.add_argument("--kleene-max", type=int, default=DEFAULT_KLEENE_MAX, help="Kleene max size (default: %(default)s)")
-    parser.add_argument("--fixed-length", type=int, default=DEFAULT_FIXED_LENGTH, help="Fixed sequence length when not using kleene")
+    parser.add_argument("--fixed-length", type=int, default=DEFAULT_FIXED_LENGTH, help="Fixed sequence length when not using Kleene")
     parser.add_argument("--max-events", type=int, help="Limit number of synthetic events (None = all)")
     parser.set_defaults(shed=None)
     return parser.parse_args()
@@ -65,6 +82,7 @@ def main() -> None:
 
     env_shed = _env_bool("BIKE_SHED_ENABLED", True)
     shed_enabled = env_shed if args.shed is None else args.shed
+    shed_mode = args.shed_mode
 
     env_drop_prob = _clamp_01(float(os.environ.get("BIKE_BASE_DROP_PROB", "0.0")))
     drop_prob = _clamp_01(args.drop_prob) if args.drop_prob is not None else env_drop_prob
@@ -78,6 +96,7 @@ def main() -> None:
     env_burst_sleep = float(os.environ.get("BIKE_BURST_SLEEP_MS", "0.0"))
     burst_sleep_ms = args.burst_sleep if args.burst_sleep is not None else env_burst_sleep
 
+    run_counters = Counter({key: 0 for key in COUNTER_KEYS})
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     matches_path = OUTPUT_DIR / f"matches_{OUTPUT_BASENAME}"
@@ -98,6 +117,8 @@ def main() -> None:
         event_sleep_ms=sleep_ms,
         burst_every=burst_every,
         burst_sleep_ms=burst_sleep_ms,
+        shed_mode=shed_mode,
+        counters=run_counters,
     )
     out = TimingBikeOutputStream(
         inp,
@@ -110,14 +131,19 @@ def main() -> None:
     out.overload_detector = overload_detector
     inp.overload_detector = overload_detector
 
+    pattern_cfg = None
     if args.kleene:
-        pattern = create_bike_hot_path_pattern(
+        pattern, pattern_cfg = create_bike_hot_path_pattern(
             target_stations=DEFAULT_TARGET_STATIONS,
             time_window_hours=DEFAULT_TIME_WINDOW_HOURS,
             max_kleene_size=args.kleene_max,
         )
     else:
         pattern = create_fixed_length_pattern(sequence_length=args.fixed_length)
+
+    if pattern_cfg is not None and hasattr(inp, 'pattern_config'):
+        inp.pattern_config = pattern_cfg
+        pattern_cfg.reset()
 
     engine = CEP([pattern])
 
@@ -157,6 +183,9 @@ def main() -> None:
     projections_csv = args.projections_csv or str(OUTPUT_DIR / f"projections_{'shed' if shed_enabled else 'baseline'}_{OUTPUT_BASENAME}.csv")
     write_projection_csv(projections_csv, projections)
 
+    counters_csv = str(OUTPUT_DIR / f"counters_{'shed' if shed_enabled else 'baseline'}_{OUTPUT_BASENAME}.csv")
+    write_counters_csv(counters_csv, run_counters)
+
     recall_value = None
     if args.baseline_projections:
         baseline_path = Path(args.baseline_projections)
@@ -186,6 +215,11 @@ def main() -> None:
         print(f"  Recall vs baseline: {recall_value:.3f}")
     print(f"  Latency CSV: {latency_csv}")
     print(f"  Projections CSV: {projections_csv}")
+    if getattr(inp, 'pattern_config', None) and getattr(inp.pattern_config, 'max_kleene_size', None):
+        print(f"  Final Kleene cap: {inp.pattern_config.max_kleene_size}")
+
+    print("\nCounters:")
+    print("  " + format_counters({key: run_counters.get(key, 0) for key in COUNTER_KEYS}))
 
     try:
         print(f"\nMatches captured in memory: {len(out.matches)}")
@@ -209,10 +243,11 @@ def main() -> None:
     else:
         print("Latency file not created (it appears only when at least one match is found).")
 
-    print("\nDone.")
+    print("\n✅ Done.")
     print("Open:")
     print(f" - {matches_path}")
     print(f" - {latency_path} (created only if there were matches)")
+    print(f" - {counters_csv}")
     print(f" - {latency_csv}")
     print(f" - {projections_csv}")
 

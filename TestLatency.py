@@ -24,7 +24,7 @@ def run_simple_timing_test():
     print()
     
     # Create pattern for bike trips ending at station 426
-    pattern = create_bike_hot_path_pattern(target_stations={426}, time_window_hours=1)
+    pattern, _ = create_bike_hot_path_pattern(target_stations={426}, time_window_hours=1)
     print("Pattern: Detecting bike hot paths ending at station 426 (1-hour window)")
     print()
     
@@ -95,7 +95,7 @@ def run_csv_timing_test(csv_file_path: str, max_events: int = 100):
     print()
     
     # Create pattern
-    pattern = create_bike_hot_path_pattern(target_stations={426, 3002, 462}, time_window_hours=1)
+    pattern, _ = create_bike_hot_path_pattern(target_stations={426, 3002, 462}, time_window_hours=1)
     print("Pattern: Detecting bike hot paths ending at target stations (1-hour window)")
     print()
     

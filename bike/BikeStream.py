@@ -7,6 +7,12 @@ import csv
 import time
 import random
 from datetime import datetime, timedelta
+from collections import Counter
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from bike.BikeHotPathPattern import BikeHotPathPatternConfig
+
 from stream.FileStream import FileOutputStream
 from stream.Stream import InputStream, OutputStream
 
@@ -144,7 +150,7 @@ class BikeCSVInputStream(InputStream):
 TestBikeInputStream = BikeCSVInputStream
 
 class TimingBikeInputStream(BikeCSVInputStream):
-    def __init__(self, file_path: str = None, max_events: int = None, use_test_data: bool = False, enable_timing: bool = True, shed_when_overloaded: bool = False, base_drop_prob: float = 0.0, event_sleep_ms: float = 0.0, burst_every: int = 0, burst_sleep_ms: float = 0.0):
+    def __init__(self, file_path: str = None, max_events: int = None, use_test_data: bool = False, enable_timing: bool = True, shed_when_overloaded: bool = False, base_drop_prob: float = 0.0, event_sleep_ms: float = 0.0, burst_every: int = 0, burst_sleep_ms: float = 0.0, shed_mode: str = "event", counters: Optional[Counter] = None):
         super().__init__(file_path, max_events, use_test_data)
         if not 0.0 <= base_drop_prob <= 1.0:
             raise ValueError('base_drop_prob must be between 0 and 1')
@@ -154,6 +160,8 @@ class TimingBikeInputStream(BikeCSVInputStream):
             raise ValueError('burst_every cannot be negative')
         if burst_sleep_ms < 0.0:
             raise ValueError('burst_sleep_ms cannot be negative')
+        if shed_mode not in {'event', 'hybrid'}:
+            raise ValueError("shed_mode must be 'event' or 'hybrid'")
 
         self.enable_timing = enable_timing
         self.system_start_time = None
@@ -165,10 +173,23 @@ class TimingBikeInputStream(BikeCSVInputStream):
         self.event_sleep_ms = event_sleep_ms
         self.burst_every = burst_every
         self.burst_sleep_ms = burst_sleep_ms
+        self.shed_mode = shed_mode
         self.overload_detector = None  # Shared reference set by runner when load shedding is active
+        self.pattern_config: Optional['BikeHotPathPatternConfig'] = None
         self.dropped_events = 0
         self.total_events_seen = 0
         self.last_drop_probability = 0.0
+        self._last_yield_timestamp = None
+        self._last_reported_cap = None
+        self.counters = counters
+        if self.counters is not None:
+            for key in ('events_ingested', 'events_dropped', 'matches_completed', 'partial_pruned', 'partial_evicted'):
+                self.counters.setdefault(key, 0)
+
+    def _increment_counter(self, key: str, amount: int = 1) -> None:
+        if self.counters is not None:
+            self.counters[key] += amount
+
 
     def __iter__(self):
         """Iterate through events while optionally measuring timing."""
@@ -180,31 +201,52 @@ class TimingBikeInputStream(BikeCSVInputStream):
         
         # Process events from the internal stream
         while not self._stream.empty():
+            resume_time = time.perf_counter()
             event = self._stream.get()
             if event is None:  # Handle end of stream
                 break
 
             self.total_events_seen += 1
-            drop_probability = 0.0
+            self._increment_counter('events_ingested')
+            overshoot = 0.0
+            if self.overload_detector:
+                if self._last_yield_timestamp is not None:
+                    event_processing_ms = (resume_time - self._last_yield_timestamp) * 1000.0
+                    if event_processing_ms >= 0:
+                        self.overload_detector.note_event_latency(event_processing_ms)
+                overshoot = self.overload_detector.overshoot() if hasattr(self.overload_detector, 'overshoot') else 0.0
 
-            if (
-                self.shed_when_overloaded
-                and self.overload_detector
-                and getattr(self.overload_detector, 'overloaded', False)
-            ):
-                ema_latency = getattr(self.overload_detector, 'ema_latency', None)
-                target_latency = getattr(self.overload_detector, 'target_latency_ms', 0.0) or 0.0
-                overshoot = 0.0
-                if ema_latency is not None:
-                    denominator = max(1.0, target_latency) if target_latency is not None else 1.0
-                    overshoot = max(0.0, (ema_latency - target_latency) / denominator)
-                drop_probability = min(0.9, self.base_drop_prob + 0.5 * overshoot)
+            drop_probability = min(0.9, self.base_drop_prob + 0.5 * overshoot)
+            drop_probability = max(0.0, drop_probability)
+            self.last_drop_probability = drop_probability
+
+            if self.pattern_config is not None:
+                base_cap = self.pattern_config.initial_max_kleene_size
+                target_cap = base_cap
+                if self.shed_mode == 'hybrid' and self.shed_when_overloaded:
+                    if overshoot > 0.0:
+                        shrink = 1 + int(overshoot * 2)
+                        target_cap = max(2, base_cap - shrink)
+                current_cap = self.pattern_config.max_kleene_size
+                if target_cap != current_cap:
+                    if target_cap < current_cap:
+                        self._increment_counter('partial_evicted', current_cap - target_cap)
+                    self.pattern_config.max_kleene_size = target_cap
+                if (
+                    self.shed_mode == 'hybrid'
+                    and self._last_reported_cap != target_cap
+                    and (self._last_reported_cap is not None or target_cap < base_cap)
+                ):
+                    print("[HybridShedding] Kleene max size adjusted to {}".format(target_cap))
+                self._last_reported_cap = target_cap
+            elif self._last_reported_cap is not None:
+                self._last_reported_cap = None
+
+            if self.shed_when_overloaded and drop_probability > 0.0:
                 if random.random() < drop_probability:
                     self.dropped_events += 1
-                    self.last_drop_probability = drop_probability
+                    self._increment_counter('events_dropped')
                     continue
-
-            self.last_drop_probability = drop_probability
 
             if self.event_sleep_ms > 0.0 or (self.burst_every and self.burst_sleep_ms > 0.0):
                 sleep_seconds = 0.0
@@ -254,6 +296,7 @@ class TimingBikeInputStream(BikeCSVInputStream):
                 except Exception as e:
                     print(f"Event {self.event_count}: Error parsing data - {e}")
             
+            self._last_yield_timestamp = time.perf_counter()
             self.event_count += 1
             yield event
 
@@ -278,10 +321,19 @@ class TimingBikeOutputStream(FileOutputStream):
         self.match_start_time = None
         self.input_stream = input_stream
         self.enable_timing = enable_timing
+        self.counters = getattr(input_stream, "counters", None)
+        if self.counters is not None:
+            self.counters.setdefault('matches_completed', 0)
     
+    def _increment_counter(self, key: str, amount: int = 1) -> None:
+        if self.counters is not None:
+            self.counters[key] += amount
+
+
     def add_item(self, item):
         """Add a pattern match with timing analysis."""
         super().add_item(item)
+        self._increment_counter('matches_completed')
 
         if not self.enable_timing:
             return
@@ -401,3 +453,4 @@ class TimingBikeOutputStream(FileOutputStream):
                 print(f"Average processing delay: {sum(delays)/len(delays):8.2f}ms")
                 print(f"Min processing delay:     {min(delays):8.2f}ms")
                 print(f"Max processing delay:     {max(delays):8.2f}ms")
+

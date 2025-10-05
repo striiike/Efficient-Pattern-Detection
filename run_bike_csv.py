@@ -1,6 +1,7 @@
 import argparse
 import os
 import time
+from collections import Counter
 from pathlib import Path
 
 from CEP import CEP
@@ -8,7 +9,12 @@ from CEP import CEP
 from bike.BikeData import BikeDataFormatter
 from bike.BikeHotPathPattern import create_bike_hot_path_pattern
 from bike.BikeStream import TimingBikeInputStream, TimingBikeOutputStream
-from evaluation.metrics import summary, write_latency_csv
+from evaluation.metrics import (
+    format_counters,
+    summary,
+    write_counters_csv,
+    write_latency_csv,
+)
 from evaluation.overload import OverloadDetector
 from evaluation.recall import recall as compute_recall, write_projection_csv
 
@@ -16,6 +22,13 @@ CSV_PATH_DEFAULT = "data/201804-citibike-tripdata_2.csv"
 MAX_EVENTS_DEFAULT = 1000
 OUTPUT_DIR = Path("bike/test_output")
 OUTPUT_NAME = "csv_hot_path"
+COUNTER_KEYS = (
+    'events_ingested',
+    'events_dropped',
+    'matches_completed',
+    'partial_pruned',
+    'partial_evicted',
+)
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -30,11 +43,18 @@ def _clamp_01(value: float) -> float:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run bike CSV pipeline with optional overload shedding and metrics logging.")
+    parser = argparse.ArgumentParser(
+        description="Run bike CSV pipeline with optional overload shedding and metrics logging."
+    )
     parser.add_argument("--csv-path", default=CSV_PATH_DEFAULT, help="Input CSV path (default: %(default)s)")
     parser.add_argument("--max-events", type=int, default=MAX_EVENTS_DEFAULT, help="Maximum events to consume (default: %(default)s)")
     parser.add_argument("--shed", dest="shed", action="store_true", help="Enable load shedding")
     parser.add_argument("--no-shed", dest="shed", action="store_false", help="Disable load shedding")
+    parser.add_argument("--shed-mode", choices=["event", "hybrid"], default="event",
+                        help="'event' = drop input events; 'hybrid' = also shrink Kleene cap under load")
+    parser.add_argument("--kleene-max", type=int, default=3, help="Maximum Kleene length for runs (default: %(default)s)")
+    parser.add_argument("--time-window-hours", type=float, default=1.0, help="Time window in hours for the pattern (default: %(default)s)")
+    parser.add_argument("--target-stations", type=str, help="Comma-separated list of target station IDs for b.end")
     parser.add_argument("--target-latency-ms", type=float, help="Override overload target in milliseconds")
     parser.add_argument("--drop-prob", type=float, help="Base drop probability when shedding")
     parser.add_argument("--sleep-ms", type=float, help="Per-event sleep in milliseconds")
@@ -50,6 +70,14 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
+    # Parse target stations if provided
+    target_stations = {426, 3002, 462}
+    if args.target_stations:
+        try:
+            target_stations = {int(s.strip()) for s in args.target_stations.split(',') if s.strip()}
+        except ValueError:
+            print('Warning: could not parse --target-stations; using defaults {426,3002,462}')
+
     baseline_p50_ms = float(os.environ.get("BIKE_BASELINE_P50_MS", "50"))
     default_target = baseline_p50_ms * 0.5
     env_target = float(os.environ.get("BIKE_OVERLOAD_TARGET_MS", str(default_target)))
@@ -57,6 +85,7 @@ def main() -> None:
 
     env_shed = _env_bool("BIKE_SHED_ENABLED", True)
     shed_enabled = env_shed if args.shed is None else args.shed
+    shed_mode = args.shed_mode
 
     env_drop_prob = _clamp_01(float(os.environ.get("BIKE_BASE_DROP_PROB", "0.0")))
     drop_prob = _clamp_01(args.drop_prob) if args.drop_prob is not None else env_drop_prob
@@ -70,6 +99,7 @@ def main() -> None:
     env_burst_sleep = float(os.environ.get("BIKE_BURST_SLEEP_MS", "0.0"))
     burst_sleep_ms = args.burst_sleep if args.burst_sleep is not None else env_burst_sleep
 
+    run_counters = Counter({key: 0 for key in COUNTER_KEYS})
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     inp = TimingBikeInputStream(
@@ -82,6 +112,8 @@ def main() -> None:
         event_sleep_ms=sleep_ms,
         burst_every=burst_every,
         burst_sleep_ms=burst_sleep_ms,
+        shed_mode=shed_mode,
+        counters=run_counters,
     )
     out = TimingBikeOutputStream(
         inp,
@@ -94,7 +126,15 @@ def main() -> None:
     out.overload_detector = overload_detector
     inp.overload_detector = overload_detector
 
-    pattern = create_bike_hot_path_pattern(target_stations={426, 3002, 462}, time_window_hours=1, max_kleene_size=3)
+    pattern, pattern_cfg = create_bike_hot_path_pattern(
+        target_stations=target_stations,
+        time_window_hours=args.time_window_hours,
+        max_kleene_size=args.kleene_max,
+    )
+    if hasattr(inp, 'pattern_config'):
+        inp.pattern_config = pattern_cfg
+        pattern_cfg.reset()
+
     engine = CEP([pattern])
 
     start_ts = time.perf_counter()
@@ -102,7 +142,7 @@ def main() -> None:
     duration_s = time.perf_counter() - start_ts
 
     if overload_detector:
-        print(f"\nOverload target latency: {target_latency_ms:.2f} ms (baseline p50 {baseline_p50_ms:.2f} ms)")
+        print(f"\nOverload target latency: {target_latency_ms:.2f} ms")
         detection_latency = overload_detector.detection_latency_ms()
         if detection_latency is not None:
             print(f"Detection latency: {detection_latency:.2f} ms")
@@ -133,6 +173,9 @@ def main() -> None:
     projections_csv = args.projections_csv or str(OUTPUT_DIR / f"projections_{'shed' if shed_enabled else 'baseline'}_{OUTPUT_NAME}.csv")
     write_projection_csv(projections_csv, projections)
 
+    counters_csv = str(OUTPUT_DIR / f"counters_{'shed' if shed_enabled else 'baseline'}_{OUTPUT_NAME}.csv")
+    write_counters_csv(counters_csv, run_counters)
+
     recall_value = None
     if args.baseline_projections:
         baseline_path = Path(args.baseline_projections)
@@ -162,11 +205,17 @@ def main() -> None:
         print(f"  Recall vs baseline: {recall_value:.3f}")
     print(f"  Latency CSV: {latency_csv}")
     print(f"  Projections CSV: {projections_csv}")
+    if getattr(inp, 'pattern_config', None) and getattr(inp.pattern_config, 'max_kleene_size', None):
+        print(f"  Final Kleene cap: {inp.pattern_config.max_kleene_size}")
+
+    print("\nCounters:")
+    print("  " + format_counters({key: run_counters.get(key, 0) for key in COUNTER_KEYS}))
 
     print("\n✅ Done.")
     print("Open:")
     print(f" - {OUTPUT_DIR / f'matches_{OUTPUT_NAME}.txt'}")
     print(f" - {OUTPUT_DIR / f'latencies_{OUTPUT_NAME}.txt'}")
+    print(f" - {counters_csv}")
     print(f" - {latency_csv}")
     print(f" - {projections_csv}")
 

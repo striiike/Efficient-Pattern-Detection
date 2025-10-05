@@ -115,7 +115,7 @@ def analyze_real_data(file_path: str, max_events: int = 20):
     top_end_stations = analyze_bike_data(file_path=file_path, max_lines=max_events, top_count=3)['top_end_stations']
     top_end_stations = {station for station, count in top_end_stations}
     # top_end_stations = {426, 3002, 462}
-    pattern = create_bike_hot_path_pattern(target_stations=top_end_stations, time_window_hours=1)
+    pattern, _ = create_bike_hot_path_pattern(target_stations=top_end_stations, time_window_hours=1)
 
     data_formatter = BikeDataFormatter()
     
@@ -155,7 +155,8 @@ def analyze_real_data(file_path: str, max_events: int = 20):
 
 
 if __name__ == "__main__":
-    # pattern = create_bike_hot_path_pattern(target_stations={426, 3002, 462}, time_window_hours=1)
+    # pattern, _ = create_bike_hot_path_pattern(target_stations={426, 3002, 462}, time_window_hours=1)
     # test_pattern(pattern, "Bike Hot Path (Kleene Closure)")
 
     analyze_real_data("data/201804-citibike-tripdata_2.csv", max_events=1000)
+

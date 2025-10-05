@@ -17,10 +17,42 @@ from condition.Condition import Variable, SimpleCondition, BinaryCondition
 from condition.BaseRelationCondition import EqCondition
 from condition.CompositeCondition import AndCondition
 from condition.KCCondition import KCIndexCondition
+from typing import Tuple
 
 DEFAULT_TARGET_STATIONS = {426, 3002, 462}
 
-def create_bike_hot_path_pattern(pattern_id=1, target_stations=None, time_window_hours=1, max_kleene_size=3):
+
+class BikeHotPathPatternConfig:
+    """Mutable configuration for dynamic hot path parameters."""
+
+    def __init__(self, kleene_operator, max_kleene_size: int) -> None:
+        if max_kleene_size < 1:
+            raise ValueError('max_kleene_size must be at least 1')
+        self._kleene_operator = kleene_operator
+        self.initial_max_kleene_size = max_kleene_size
+        self._max_kleene_size = None
+        self.max_kleene_size = max_kleene_size
+
+    @property
+    def max_kleene_size(self) -> int:
+        return self._max_kleene_size
+
+    @max_kleene_size.setter
+    def max_kleene_size(self, value: int) -> None:
+        if value is None:
+            raise ValueError('max_kleene_size cannot be None')
+        value = max(1, int(value))
+        if value == self._max_kleene_size:
+            return
+        self._max_kleene_size = value
+        self._kleene_operator.max_size = value
+
+    def reset(self) -> None:
+        """Restore the Kleene cap to its initial value."""
+        self.max_kleene_size = self.initial_max_kleene_size
+
+
+def create_bike_hot_path_pattern(pattern_id=1, target_stations=None, time_window_hours=1, max_kleene_size=3) -> Tuple[Pattern, BikeHotPathPatternConfig]:
     """
     Create the bike hot path detection pattern.
     
@@ -30,20 +62,22 @@ def create_bike_hot_path_pattern(pattern_id=1, target_stations=None, time_window
         time_window_hours: Time window in hours (default: 1)
     
     Returns:
-        Pattern: The configured bike hot path pattern
+        Tuple[Pattern, BikeHotPathPatternConfig]: The configured pattern and a mutable config
     """
     if target_stations is None:
         target_stations = DEFAULT_TARGET_STATIONS
     
     # Structure: SEQ(BikeTrip+ a[], BikeTrip b)
+    kleene_operator = KleeneClosureOperator(
+        PrimitiveEventStructure("BikeTrip", "a"),
+        min_size=1,  # Allow single trips to test time window properly
+        max_size=max_kleene_size
+    )
     pattern_structure = SeqOperator(
-        KleeneClosureOperator(
-            PrimitiveEventStructure("BikeTrip", "a"),
-            min_size=1,  # Reverted: Allow single trips to test time window properly
-            max_size=max_kleene_size  # Reasonable limit to prevent excessive matches
-        ),
+        kleene_operator,
         PrimitiveEventStructure("BikeTrip", "b")
     )
+    pattern_config = BikeHotPathPatternConfig(kleene_operator, max_kleene_size)
     
     conditions = []
     
@@ -113,13 +147,6 @@ def create_bike_hot_path_pattern(pattern_id=1, target_stations=None, time_window
     )
     conditions.append(time_span_constraint)
 
-
-    # Condition 6: a[last].end = b.start 
-    same_bike_final = EqCondition(
-        Variable("a", lambda events: events[-1]["end"] if events else None),
-        Variable("b", lambda event: event["start"])
-    )
-    conditions.append(same_bike_final)
     
     # Combine all conditions with AND
     pattern_condition = AndCondition(*conditions)
@@ -132,7 +159,7 @@ def create_bike_hot_path_pattern(pattern_id=1, target_stations=None, time_window
         pattern_id=pattern_id
     )
     
-    return pattern
+    return pattern, pattern_config
 
 
 def create_fixed_length_pattern(pattern_id=2, target_stations=None, sequence_length=3):

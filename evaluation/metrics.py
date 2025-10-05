@@ -1,9 +1,9 @@
-"""Utilities for recording latency stats and summarising runs."""
+"""Utilities for recording latency stats, counters, and summarising runs."""
 
 import csv
 import os
 import statistics
-from typing import Iterable, List
+from typing import Iterable, List, Mapping, Any
 
 
 def write_latency_csv(path: str, delays_ms: Iterable[float]) -> None:
@@ -37,3 +37,18 @@ def summary(delays_ms: List[float]) -> dict:
         index = max(0, int(round(0.95 * (len(samples) - 1))))
         result["p95"] = samples[index]
     return result
+
+
+def write_counters_csv(path: str, counters: Mapping[str, Any]) -> None:
+    """Write counter values to a CSV file with columns name,value."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", newline="", encoding="utf-8") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow(["name", "value"])
+        for key in sorted(counters):
+            writer.writerow([key, counters[key]])
+
+
+def format_counters(counters: Mapping[str, Any]) -> str:
+    """Return a human-readable string for counter values."""
+    return ", ".join(f"{key}: {counters[key]}" for key in sorted(counters))

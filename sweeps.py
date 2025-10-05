@@ -5,6 +5,8 @@ import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
+from collections import Counter
+
 from CEP import CEP
 
 from bike.BikeData import BikeDataFormatter
@@ -14,6 +16,7 @@ from evaluation.metrics import summary
 from evaluation.overload import OverloadDetector
 
 Projection = Tuple[int, int, int]
+COUNTER_KEYS = ('events_ingested', 'events_dropped', 'matches_completed', 'partial_pruned', 'partial_evicted')
 
 
 def _parse_caps(text: str) -> List[float]:
@@ -39,8 +42,10 @@ def _run_pipeline(
     event_sleep_ms: float,
     burst_every: int,
     burst_sleep_ms: float,
+    shed_mode: str = 'event',
 ) -> Dict[str, object]:
     base_path.mkdir(parents=True, exist_ok=True)
+    run_counters = Counter({key: 0 for key in COUNTER_KEYS})
 
     input_stream = TimingBikeInputStream(
         file_path=csv_path,
@@ -67,11 +72,14 @@ def _run_pipeline(
         output_stream.overload_detector = overload_detector
         input_stream.overload_detector = overload_detector
 
-    pattern = create_bike_hot_path_pattern(
+    pattern, pattern_cfg = create_bike_hot_path_pattern(
         target_stations={426, 3002, 462},
         time_window_hours=1,
         max_kleene_size=3,
     )
+    if hasattr(input_stream, 'pattern_config'):
+        input_stream.pattern_config = pattern_cfg
+        pattern_cfg.reset()
     engine = CEP([pattern])
 
     start_time = time.perf_counter()
@@ -94,6 +102,7 @@ def _run_pipeline(
         "matches": len(matches),
         "events": input_stream.event_count,
         "throughput": throughput,
+        "counters": run_counters,
         "detector": overload_detector,
     }
 
