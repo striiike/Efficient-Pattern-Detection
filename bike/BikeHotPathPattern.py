@@ -106,12 +106,19 @@ def create_bike_hot_path_pattern(pattern_id=1, target_stations=None, time_window
     )
     conditions.append(target_station_check)
     
-    # Condition 4: a[last].bike = b.bike (same bike used throughout)
+    # Condition 4a: a[last].bike = b.bike (same bike used throughout)
     same_bike_final = EqCondition(
         Variable("a", lambda events: events[-1]["bike"] if events else None),
         Variable("b", lambda event: event["bike"])
     )
     conditions.append(same_bike_final)
+
+    # Condition 4b: a[last].end = b.end 
+    chained_to_b = EqCondition(
+        Variable("a", lambda events: events[-1]["end"] if events else None),
+        Variable("b", lambda event: event["end"])
+    )
+    conditions.append(chained_to_b)
     
     # Condition 5: EXPLICIT TIME CONSTRAINT - total sequence time <= 1 hour
     # This ensures the entire sequence from first trip start to last trip end is within time window
