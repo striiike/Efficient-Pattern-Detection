@@ -98,7 +98,7 @@ This will:
 
 **Expected output:** A set of station IDs like `{2006, 3165, 3163, 3168, 3160, 3147, 457, 3164, 3167, 3170}`
 
-**Note:** The time-sorted version (`*_sorted.csv`) provides better pattern detection results (95 matches vs 86 matches) as it ensures chronological event processing.
+**Note:** The time-sorted version (`*_sorted.csv`) provides better pattern detection results as it ensures chronological event processing.
 
 ### Step 1: Synthetic Sanity Checks (No Shedding)
 
