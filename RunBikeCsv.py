@@ -168,7 +168,7 @@ def main() -> None:
     processed_events = getattr(inp, "event_count", 0)
     matches = len(getattr(out, "matches", []))
     delays_ms = [m.get("match_processing_delay_ms", 0.0) for m in out.matches if m.get("match_processing_delay_ms", 0.0) > 0]
-    projections = {m.get("projection") for m in out.matches if m.get("projection")}
+    projections = [m.get("projection") for m in out.matches if m.get("projection")]
 
     throughput = processed_events / duration_s if duration_s > 0 else 0.0
     recall_proxy = (matches / processed_events) if processed_events else 0.0
