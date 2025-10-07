@@ -164,7 +164,7 @@ python RunBikeCSV.py --shed --shed-mode event \
   --csv-path data/chain_trips_subset_1h_sorted.csv \
   --max-events 1000 \
   --kleene-max 3 \
-  --target-latency-ms $(python -c "print($P50*$CAP)") \
+  --target-latency-ms $($P50 * $CAP) \
   --drop-prob 0.05 \
   --baseline-projections bike/test_output/projections_baseline_csv_hot_path.csv
 ```

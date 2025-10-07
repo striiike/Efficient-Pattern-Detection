@@ -72,6 +72,12 @@ def main() -> None:
 
     # Parse target stations if provided
     target_stations = {426, 3002, 462}
+    
+    from ChainAnalysis import analyze_top_stations
+
+    top_stations = analyze_top_stations(args.csv_path, limit=1000, top_n=10)
+    target_stations = { int(station['station']) for station in top_stations }
+    
     if args.target_stations:
         try:
             target_stations = {int(s.strip()) for s in args.target_stations.split(',') if s.strip()}
