@@ -21,6 +21,7 @@ RETURN (a[1].start, a[i].end, b.end)
 
 **Robustness enforced in code:**
 - `b.end_time - a[1].start_time ≤ 1h` (and the engine's 1h window)
+- `a[last].end = b.end` (chain condition)
 
 > **Note:** OpenCEP does not expose `RETURN` directly, so we compute the projection triple `(a1_start, last_a_end, b_end)` in the output stream for recall evaluation.
 
@@ -67,6 +68,7 @@ data/201804-citibike-tripdata_2.csv
 
 All commands below use 1000 events. The workflow consists of:
 
+0. **Chain Analysis (Prerequisite)**: Generate optimized chain trip data for better pattern detection
 1. **Synthetic sanity checks** (no shedding): Validate SEQ + Kleene + window correctness
 2. **CSV baseline** (no shedding): Produce baseline latency and projections (reference for recall)
 3. **Event-level shedding**: Check latency vs recall trade-off at 10/30/50/70/90% of baseline p50
@@ -77,6 +79,26 @@ All commands below use 1000 events. The workflow consists of:
 ---
 
 ## Usage
+
+### Step 0: Chain Analysis (Prerequisite)
+
+**Generate optimized chain trip data for improved pattern detection:**
+
+```bash
+python ChainAnalysis.py
+```
+
+This will:
+- Analyze the original dataset to find hot end stations
+- Extract continuous bike trip chains (≤1 hour duration)
+- Generate two versions of optimized data:
+  - `data/chain_trips_subset_1h.csv` (original order)
+  - `data/chain_trips_subset_1h_sorted.csv` (time-sorted, **recommended for CEP**)
+- Output the top 10 hot end stations for reference
+
+**Expected output:** A set of station IDs like `{2006, 3165, 3163, 3168, 3160, 3147, 457, 3164, 3167, 3170}`
+
+**Note:** The time-sorted version (`*_sorted.csv`) provides better pattern detection results (95 matches vs 86 matches) as it ensures chronological event processing.
 
 ### Step 1: Synthetic Sanity Checks (No Shedding)
 
@@ -98,6 +120,8 @@ python RunSyntheticBike.py --no-shed --fixed-length 3
 
 ### Step 2: CSV Baseline (No Shedding)
 
+**Use the optimized chain data generated in Step 0:**
+
 This produces:
 - Latency CSV (per-match samples)
 - Baseline projections CSV (used to compute recall)
@@ -106,7 +130,7 @@ This produces:
 ```bash
 python RunBikeCSV.py \
   --no-shed \
-  --csv-path data/201804-citibike-tripdata_2.csv \
+  --csv-path data/chain_trips_subset_1h_sorted.csv \
   --max-events 1000 \
   --kleene-max 3 \
   --latency-csv bike/test_output/latency_samples_baseline_csv_hot_path.csv \
@@ -129,77 +153,18 @@ Use the baseline projections from Step 2. Replace `P50` below with the median yo
 P50=400
 ```
 
-#### 10% Cap
+#### Run with different cap values (10%, 30%, 50%, 70%, 90%)
+
+Replace `CAP` with desired percentage (0.10, 0.30, 0.50, 0.70, 0.90):
 
 ```bash
+CAP=0.50  # Example: 50% cap
+
 python RunBikeCSV.py --shed --shed-mode event \
-  --csv-path data/201804-citibike-tripdata_2.csv \
+  --csv-path data/chain_trips_subset_1h_sorted.csv \
   --max-events 1000 \
   --kleene-max 3 \
-  --target-latency-ms $(python - <<EOF
-p50=$P50; print(p50*0.10)
-EOF
-) \
-  --drop-prob 0.05 \
-  --baseline-projections bike/test_output/projections_baseline_csv_hot_path.csv
-```
-
-#### 30% Cap
-
-```bash
-python RunBikeCSV.py --shed --shed-mode event \
-  --csv-path data/201804-citibike-tripdata_2.csv \
-  --max-events 1000 \
-  --kleene-max 3 \
-  --target-latency-ms $(python - <<EOF
-p50=$P50; print(p50*0.30)
-EOF
-) \
-  --drop-prob 0.05 \
-  --baseline-projections bike/test_output/projections_baseline_csv_hot_path.csv
-```
-
-#### 50% Cap
-
-```bash
-python RunBikeCSV.py --shed --shed-mode event \
-  --csv-path data/201804-citibike-tripdata_2.csv \
-  --max-events 1000 \
-  --kleene-max 3 \
-  --target-latency-ms $(python - <<EOF
-p50=$P50; print(p50*0.50)
-EOF
-) \
-  --drop-prob 0.05 \
-  --baseline-projections bike/test_output/projections_baseline_csv_hot_path.csv
-```
-
-#### 70% Cap
-
-```bash
-python RunBikeCSV.py --shed --shed-mode event \
-  --csv-path data/201804-citibike-tripdata_2.csv \
-  --max-events 1000 \
-  --kleene-max 3 \
-  --target-latency-ms $(python - <<EOF
-p50=$P50; print(p50*0.70)
-EOF
-) \
-  --drop-prob 0.05 \
-  --baseline-projections bike/test_output/projections_baseline_csv_hot_path.csv
-```
-
-#### 90% Cap
-
-```bash
-python RunBikeCSV.py --shed --shed-mode event \
-  --csv-path data/201804-citibike-tripdata_2.csv \
-  --max-events 1000 \
-  --kleene-max 3 \
-  --target-latency-ms $(python - <<EOF
-p50=$P50; print(p50*0.90)
-EOF
-) \
+  --target-latency-ms $(python -c "print($P50*$CAP)") \
   --drop-prob 0.05 \
   --baseline-projections bike/test_output/projections_baseline_csv_hot_path.csv
 ```
@@ -223,13 +188,10 @@ This showcases state-aware shedding: under overload, the engine shrinks max Klee
 
 ```bash
 python RunBikeCSV.py --shed --shed-mode hybrid \
-  --csv-path data/201804-citibike-tripdata_2.csv \
+  --csv-path data/chain_trips_subset_1h_sorted.csv \
   --max-events 1000 \
   --kleene-max 4 \
-  --target-latency-ms $(python - <<EOF
-p50=$P50; print(p50*0.50)
-EOF
-) \
+  --target-latency-ms $(python -c "print($P50*0.50)") \
   --drop-prob 0.02 \
   --baseline-projections bike/test_output/projections_baseline_csv_hot_path.csv
 ```
@@ -247,16 +209,13 @@ Inject periodic stalls to simulate bursty conditions and observe detection laten
 
 ```bash
 python RunBikeCSV.py --shed --shed-mode event \
-  --csv-path data/201804-citibike-tripdata_2.csv \
+  --csv-path data/chain_trips_subset_1h_sorted.csv \
   --max-events 1000 \
   --kleene-max 3 \
   --drop-prob 0.05 \
   --burst-every 400 \
   --burst-sleep 300 \
-  --target-latency-ms $(python - <<EOF
-p50=$P50; print(p50*0.50)
-EOF
-) \
+  --target-latency-ms $(python -c "print($P50*0.50)") \
   --baseline-projections bike/test_output/projections_baseline_csv_hot_path.csv
 ```
 
@@ -270,7 +229,7 @@ Run a baseline and sweep 10/30/50/70/90% automatically with outputs in a dedicat
 
 ```bash
 python Sweeps.py \
-  --csv-path data/201804-citibike-tripdata_2.csv \
+  --csv-path data/chain_trips_subset_1h_sorted.csv \
   --max-events 1000 \
   --caps 0.1,0.3,0.5,0.7,0.9 \
   --drop-prob 0.05 \

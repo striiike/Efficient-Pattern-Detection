@@ -6,7 +6,6 @@ It imports the pattern definitions from bike_hot_path_pattern.py and tests them 
 synthetic and real data.
 """
 
-from AnalyzeData import analyze_bike_data
 from test.testUtils import DEFAULT_TESTING_EVALUATION_MECHANISM_SETTINGS
 from stream.FileStream import FileOutputStream
 from CEP import CEP
@@ -112,9 +111,9 @@ def analyze_real_data(file_path: str, max_events: int = 20):
     print(f"Processing first {max_events} events only")
     print()
     
-    top_end_stations = analyze_bike_data(file_path=file_path, max_lines=max_events, top_count=3)['top_end_stations']
-    top_end_stations = {station for station, count in top_end_stations}
-    # top_end_stations = {426, 3002, 462}
+    # top_end_stations = analyze_bike_data(file_path=file_path, max_lines=max_events, top_count=3)['top_end_stations']
+    # top_end_stations = {station for station, count in top_end_stations}
+    top_end_stations = {426, 3002, 462}
     pattern, _ = create_bike_hot_path_pattern(target_stations=top_end_stations, time_window_hours=1)
 
     data_formatter = BikeDataFormatter()
