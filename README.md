@@ -66,7 +66,7 @@ data/201804-citibike-tripdata_2.csv
 
 ## Quick Start
 
-All commands below use 1000 events. The workflow consists of:
+All commands below use 10000 events. The workflow consists of:
 
 0. **Chain Analysis (Prerequisite)**: Generate optimized chain trip data for better pattern detection
 1. **Synthetic sanity checks** (no shedding): Validate SEQ + Kleene + window correctness
@@ -131,7 +131,7 @@ This produces:
 python RunBikeCSV.py \
   --no-shed \
   --csv-path data/chain_trips_subset_1h_sorted.csv \
-  --max-events 1000 \
+  --max-events 10000 \
   --kleene-max 3 \
   --latency-csv bike/test_output/latency_samples_baseline_csv_hot_path.csv \
   --projections-csv bike/test_output/projections_baseline_csv_hot_path.csv
@@ -162,7 +162,7 @@ CAP=0.50  # Example: 50% cap
 
 python RunBikeCSV.py --shed --shed-mode event \
   --csv-path data/chain_trips_subset_1h_sorted.csv \
-  --max-events 1000 \
+  --max-events 10000 \
   --kleene-max 3 \
   --target-latency-ms $($P50 * $CAP) \
   --drop-prob 0.05 \
@@ -171,7 +171,7 @@ python RunBikeCSV.py --shed --shed-mode event \
 
 **Check stdout for each cap:**
 - "Overload target latency …"
-- "Events dropped: X / 1000 (Y%)"
+- "Events dropped: X / 10000 (Y%)"
 - "Latency summary (ms): p50/p95"
 - "Recall vs baseline: …" (grading metric)
 
@@ -189,7 +189,7 @@ This showcases state-aware shedding: under overload, the engine shrinks max Klee
 ```bash
 python RunBikeCSV.py --shed --shed-mode hybrid \
   --csv-path data/chain_trips_subset_1h_sorted.csv \
-  --max-events 1000 \
+  --max-events 10000 \
   --kleene-max 4 \
   --target-latency-ms $(python -c "print($P50*0.50)") \
   --drop-prob 0.02 \
@@ -210,7 +210,7 @@ Inject periodic stalls to simulate bursty conditions and observe detection laten
 ```bash
 python RunBikeCSV.py --shed --shed-mode event \
   --csv-path data/chain_trips_subset_1h_sorted.csv \
-  --max-events 1000 \
+  --max-events 10000 \
   --kleene-max 3 \
   --drop-prob 0.05 \
   --burst-every 400 \
@@ -230,7 +230,7 @@ Run a baseline and sweep 10/30/50/70/90% automatically with outputs in a dedicat
 ```bash
 python Sweeps.py \
   --csv-path data/chain_trips_subset_1h_sorted.csv \
-  --max-events 1000 \
+  --max-events 10000 \
   --caps 0.1,0.3,0.5,0.7,0.9 \
   --drop-prob 0.05 \
   --output-dir bike/test_output/sweeps
