@@ -13,6 +13,8 @@ from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from bike.BikeHotPathPattern import BikeHotPathPatternConfig
 
+from bike.BikeHotPathPattern import DEFAULT_TARGET_STATIONS
+from bike.EventUtilityScorer import BikeEventUtilityScorer
 from stream.FileStream import FileOutputStream
 from stream.Stream import InputStream, OutputStream
 
@@ -175,7 +177,8 @@ class TimingBikeInputStream(BikeCSVInputStream):
         self.burst_sleep_ms = burst_sleep_ms
         self.shed_mode = shed_mode
         self.overload_detector = None  # Shared reference set by runner when load shedding is active
-        self.pattern_config: Optional['BikeHotPathPatternConfig'] = None
+        self._pattern_config: Optional['BikeHotPathPatternConfig'] = None
+        self._utility_scorer = BikeEventUtilityScorer(target_stations=DEFAULT_TARGET_STATIONS)
         self.dropped_events = 0
         self.total_events_seen = 0
         self.last_drop_probability = 0.0
@@ -189,6 +192,66 @@ class TimingBikeInputStream(BikeCSVInputStream):
     def _increment_counter(self, key: str, amount: int = 1) -> None:
         if self.counters is not None:
             self.counters[key] += amount
+
+    @property
+    def pattern_config(self) -> Optional['BikeHotPathPatternConfig']:
+        return self._pattern_config
+
+    @pattern_config.setter
+    def pattern_config(self, config: Optional['BikeHotPathPatternConfig']) -> None:
+        self._pattern_config = config
+        self._configure_utility_scorer()
+
+    def _configure_utility_scorer(self) -> None:
+        if self._utility_scorer is None or self._pattern_config is None:
+            return
+        targets = getattr(self._pattern_config, "target_stations", None)
+        if targets:
+            self._utility_scorer.update_targets(targets)
+        window = getattr(self._pattern_config, "time_window", None)
+        if window is not None:
+            self._utility_scorer.update_window(window)
+
+    @staticmethod
+    def _safe_int(value: Optional[str]) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _parse_time(value: Optional[str]) -> Optional[datetime]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        if not stripped:
+            return None
+        try:
+            return datetime.strptime(stripped, "%Y-%m-%d %H:%M:%S.%f")
+        except ValueError:
+            return None
+
+    def _parse_event_payload(self, raw_event: str):
+        parts = raw_event.strip().split(',')
+        bike_id = parts[11].strip() if len(parts) > 11 and parts[11] else None
+        start_station = self._safe_int(parts[3]) if len(parts) > 3 else None
+        end_station = self._safe_int(parts[7]) if len(parts) > 7 else None
+        start_time_str = parts[1].strip() if len(parts) > 1 else None
+        end_time_str = parts[2].strip() if len(parts) > 2 else None
+        start_time = self._parse_time(start_time_str)
+        end_time = self._parse_time(end_time_str)
+        return {
+            'parts': parts,
+            'bike_id': bike_id,
+            'start_station': start_station,
+            'end_station': end_station,
+            'start_time': start_time,
+            'end_time': end_time,
+            'start_time_str': start_time_str,
+            'end_time_str': end_time_str,
+        }
 
 
     def __iter__(self):
@@ -220,6 +283,23 @@ class TimingBikeInputStream(BikeCSVInputStream):
             drop_probability = max(0.0, drop_probability)
             self.last_drop_probability = drop_probability
 
+            payload = self._parse_event_payload(event)
+            classification = "supporting"
+            scorer = self._utility_scorer
+            if scorer is not None:
+                score, classification = scorer.score_event(
+                    payload.get('bike_id'),
+                    payload.get('start_station'),
+                    payload.get('end_station'),
+                    payload.get('start_time'),
+                    payload.get('end_time'),
+                )
+            else:
+                score = None
+
+            payload['utility_score'] = score
+            payload['utility_label'] = classification
+
             if self.pattern_config is not None:
                 base_cap = self.pattern_config.initial_max_kleene_size
                 target_cap = base_cap
@@ -242,11 +322,31 @@ class TimingBikeInputStream(BikeCSVInputStream):
             elif self._last_reported_cap is not None:
                 self._last_reported_cap = None
 
+            should_drop = False
+            drop_chance = 0.0
             if self.shed_when_overloaded and drop_probability > 0.0:
-                if random.random() < drop_probability:
-                    self.dropped_events += 1
-                    self._increment_counter('events_dropped')
-                    continue
+                if classification == "non_critical":
+                    drop_chance = drop_probability
+                elif classification == "supporting" and overshoot > 0.6:
+                    drop_chance = drop_probability * min(1.0, overshoot)
+                else:
+                    drop_chance = 0.0
+                if drop_chance > 0.0 and random.random() < drop_chance:
+                    should_drop = True
+
+            if should_drop:
+                self.dropped_events += 1
+                self._increment_counter('events_dropped')
+                if scorer is not None:
+                    scorer.note_event(
+                        payload.get('bike_id'),
+                        payload.get('start_station'),
+                        payload.get('end_station'),
+                        payload.get('start_time'),
+                        payload.get('end_time'),
+                        accepted=False,
+                    )
+                continue
 
             if self.event_sleep_ms > 0.0 or (self.burst_every and self.burst_sleep_ms > 0.0):
                 sleep_seconds = 0.0
@@ -257,6 +357,16 @@ class TimingBikeInputStream(BikeCSVInputStream):
                         sleep_seconds += self.burst_sleep_ms / 1000.0
                 if sleep_seconds > 0.0:
                     time.sleep(sleep_seconds)
+
+            if scorer is not None:
+                scorer.note_event(
+                    payload.get('bike_id'),
+                    payload.get('start_station'),
+                    payload.get('end_station'),
+                    payload.get('start_time'),
+                    payload.get('end_time'),
+                    accepted=True,
+                )
 
             if self.enable_timing:
                 current_time = time.perf_counter()
@@ -271,12 +381,11 @@ class TimingBikeInputStream(BikeCSVInputStream):
                 
                 # Extract info from event data and store processing time by event key
                 try:
-                    parts = event.split(',')
-                    bike_id = parts[11] if len(parts) > 11 else "Unknown"
-                    start_station = parts[3] if len(parts) > 3 else "Unknown"
-                    end_station = parts[7] if len(parts) > 7 else "Unknown"
-                    start_time = parts[1] if len(parts) > 1 else "Unknown"
-                    
+                    bike_id = payload.get('bike_id') or "Unknown"
+                    start_station = payload.get('start_station')
+                    end_station = payload.get('end_station')
+                    start_time = payload.get('start_time_str') or "Unknown"
+
                     # Create a unique key for this event (bike_id + start_time)
                     event_key = f"{bike_id}_{start_time}"
                     self.event_processing_times[event_key] = gap_ms

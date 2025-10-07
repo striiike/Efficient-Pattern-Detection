@@ -25,13 +25,22 @@ DEFAULT_TARGET_STATIONS = {426, 3002, 462}
 class BikeHotPathPatternConfig:
     """Mutable configuration for dynamic hot path parameters."""
 
-    def __init__(self, kleene_operator, max_kleene_size: int) -> None:
+    def __init__(
+        self,
+        kleene_operator,
+        max_kleene_size: int,
+        target_stations=None,
+        time_window_hours: float = 1.0,
+    ) -> None:
         if max_kleene_size < 1:
             raise ValueError('max_kleene_size must be at least 1')
         self._kleene_operator = kleene_operator
         self.initial_max_kleene_size = max_kleene_size
         self._max_kleene_size = None
         self.max_kleene_size = max_kleene_size
+        self.target_stations = set(target_stations) if target_stations is not None else set(DEFAULT_TARGET_STATIONS)
+        self.time_window_hours = float(time_window_hours)
+        self.time_window = timedelta(hours=self.time_window_hours)
 
     @property
     def max_kleene_size(self) -> int:
@@ -77,7 +86,12 @@ def create_bike_hot_path_pattern(pattern_id=1, target_stations=None, time_window
         kleene_operator,
         PrimitiveEventStructure("BikeTrip", "b")
     )
-    pattern_config = BikeHotPathPatternConfig(kleene_operator, max_kleene_size)
+    pattern_config = BikeHotPathPatternConfig(
+        kleene_operator,
+        max_kleene_size,
+        target_stations=target_stations,
+        time_window_hours=time_window_hours,
+    )
     
     conditions = []
     
