@@ -1,7 +1,7 @@
 # Efficient Pattern Detection over Data Streams
 
 **CS-E4780 Scalable Systems and Data Management — Course Project 1**  
-Group 7 — Baiyan Che @striiike, Amirreza Jafariandehkordi @Amirjjf
+Group 7 — Baiyan Che [@striiike](https://github.com/striiike), Amirreza Jafariandehkordi [@Amirjjf](https://github.com/Amirjjf)
 
 ---
 
