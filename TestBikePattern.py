@@ -1,15 +1,7 @@
-"""
-Test suite for bike hot path pattern detection.
-
-This module tests the bike trip hot path detection patterns using the OpenCEP framework.
-It imports the pattern definitions from bike_hot_path_pattern.py and tests them with
-synthetic and real data.
-"""
-
 from test.testUtils import DEFAULT_TESTING_EVALUATION_MECHANISM_SETTINGS
 from stream.FileStream import FileOutputStream
 from CEP import CEP
-from bike.BikeStream import BikeCSVInputStream, TestBikeInputStream, TimingBikeOutputStream  # Import from bike_stream.py
+from bike.BikeStream import BikeCSVInputStream, TestBikeInputStream, TimingBikeOutputStream 
 from bike.BikeHotPathPattern import (
     create_bike_hot_path_pattern,
     get_pattern_info
@@ -22,18 +14,6 @@ sys.path.append(os.path.dirname(__file__))
 
 
 def test_pattern(pattern, pattern_name):
-    """
-    Test a specific pattern with given test data.
-
-    Args:
-        pattern: The pattern to test
-        pattern_name: Name for reporting
-        test_data_type: Type of test data to use
-
-    Returns:
-        tuple: (number_of_matches, execution_time)
-    """
-
 
     print(f"\n{'='*60}")
     print(f"TESTING: {pattern_name}")
@@ -72,12 +52,12 @@ def test_pattern(pattern, pattern_name):
             content = f.read().strip()
 
         if content:
-            # Split by double newlines to get groups (pattern matches)
+            # Split by double newlines to get groups
             groups = [group.strip()
                       for group in content.split('\n\n') if group.strip()]
             match_count = len(groups)
             print(
-                f"✅ Found {match_count} pattern matches in {execution_time:.3f}s")
+                f"Found {match_count} pattern matches in {execution_time:.3f}s")
 
             # Show first few pattern matches with their events
             for i, group in enumerate(groups[:3], 1):
@@ -89,30 +69,21 @@ def test_pattern(pattern, pattern_name):
 
 
         else:
-            print("❌ No matches found")
+            print("No matches found")
     else:
-        print("❌ Output file not created")
+        print("Output file not created")
 
     return match_count, execution_time
 
 
 def analyze_real_data(file_path: str, max_events: int = 20):
-    """
-    Analyze real bike trip data for hot path patterns.
-    
-    Args:
-        file_path: Path to the CSV file
-        max_events: Maximum number of events to process
-    """
     print("=" * 60)
     print(f"BIKE HOT PATH ANALYSIS - REAL DATA (First {max_events} events)")
     print("=" * 60)
     print(f"Data source: {file_path}")
     print(f"Processing first {max_events} events only")
     print()
-    
-    # top_end_stations = analyze_bike_data(file_path=file_path, max_lines=max_events, top_count=3)['top_end_stations']
-    # top_end_stations = {station for station, count in top_end_stations}
+
     top_end_stations = {426, 3002, 462}
     pattern, _ = create_bike_hot_path_pattern(target_stations=top_end_stations, time_window_hours=1)
 
@@ -138,10 +109,10 @@ def analyze_real_data(file_path: str, max_events: int = 20):
             content = f.read().strip()
 
         if content:
-            # Split by double newlines to get groups (pattern matches)
+            # Split by double newlines to get groups 
             groups = [group.strip() for group in content.split('\n\n') if group.strip()]
             match_count = len(groups)
-            print(f"✅ Found {match_count} pattern matches in {execution_time:.3f}s")
+            print(f"Found {match_count} pattern matches in {execution_time:.3f}s")
 
             # Show first few pattern matches with their events
             for i, group in enumerate(groups[:3], 1):
@@ -154,8 +125,6 @@ def analyze_real_data(file_path: str, max_events: int = 20):
 
 
 if __name__ == "__main__":
-    # pattern, _ = create_bike_hot_path_pattern(target_stations={426, 3002, 462}, time_window_hours=1)
-    # test_pattern(pattern, "Bike Hot Path (Kleene Closure)")
 
     analyze_real_data("data/201804-citibike-tripdata_2.csv", max_events=1000)
 

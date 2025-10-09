@@ -1,9 +1,3 @@
-"""
-Simple timing test for OpenCEP event processing detection.
-Shows exactly when each event starts being processed and the gaps from system start.
-Uses the enhanced BikeStream classes with integrated timing capabilities.
-"""
-
 import time
 from datetime import datetime
 from CEP import CEP
@@ -16,7 +10,6 @@ import os
 
 
 def run_simple_timing_test():
-    """Main timing test function using enhanced BikeStream classes."""
     print("🔍 OpenCEP Event Processing Timing Test")
     print("=" * 70)
     print("Purpose: Detect when OpenCEP starts processing each input event")
@@ -29,7 +22,7 @@ def run_simple_timing_test():
     print()
     
     input_stream = TimingBikeInputStream(
-        file_path=None,  # Use test data
+        file_path=None, 
         use_test_data=True
     )
     
@@ -80,7 +73,7 @@ def run_simple_timing_test():
 
         
     except Exception as e:
-        print(f"❌ Error during execution: {e}")
+        print(f"Error during execution: {e}")
         import traceback
         traceback.print_exc()
 
@@ -100,7 +93,7 @@ def run_csv_timing_test(csv_file_path: str, max_events: int = 100):
     print()
     
     input_stream = TimingBikeInputStream(
-        file_path=csv_file_path,  # Use test data
+        file_path=csv_file_path, 
         max_events=max_events
     )
     
@@ -123,11 +116,11 @@ def run_csv_timing_test(csv_file_path: str, max_events: int = 100):
         # Run the test
         execution_time = cep_engine.run(input_stream, output_stream, data_formatter)
         
-        print(f"✅ CSV test completed in {execution_time:.6f} seconds")
+        print(f"CSV test completed in {execution_time:.6f} seconds")
         print(f"Results saved to: {output_dir}/csv_timing_test_matches.txt")
         
     except Exception as e:
-        print(f"❌ Error during CSV test: {e}")
+        print(f"Error during CSV test: {e}")
 
 
 
@@ -137,5 +130,4 @@ if __name__ == "__main__":
     
     print("\n" + "=" * 80)
     
-    # Uncomment the following line to test with real CSV data:
     run_csv_timing_test('data/201804-citibike-tripdata_2.csv', max_events=1000)

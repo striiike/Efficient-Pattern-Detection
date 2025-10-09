@@ -1,8 +1,3 @@
-"""
-Stream adapters for bike data - both CSV files and synthetic test data.
-Creates input streams for bike trip pattern testing with timing measurement capabilities.
-"""
-
 import csv
 import time
 import random
@@ -20,21 +15,9 @@ from stream.Stream import InputStream, OutputStream
 
 
 class BikeCSVInputStream(InputStream):
-    """
-    Reads bike trip data from a CSV file and creates an input stream.
-    Supports both file reading and synthetic test data generation.
-    Includes timing measurement capabilities for performance analysis.
-    """
+
     def __init__(self, file_path: str = None, max_events: int = None, use_test_data: bool = False):
-        """
-        Initialize the bike input stream.
-        
-        Args:
-            file_path: Path to the CSV file (None for test data)
-            max_events: Maximum number of events to read (None for all)
-            use_test_data: If True, generate synthetic test data instead of reading file
-            enable_timing: If True, enable timing measurement for each event
-        """
+
         super().__init__()
         
         if use_test_data or file_path is None:
@@ -43,7 +26,7 @@ class BikeCSVInputStream(InputStream):
             self._load_csv_data(file_path, max_events)
     
     def _load_csv_data(self, file_path: str, max_events: int):
-        """Load data from CSV file."""
+        # Load data from CSV file.
         event_count = 0
         
         try:
@@ -64,7 +47,7 @@ class BikeCSVInputStream(InputStream):
                     if max_events and event_count >= max_events:
                         break
                         
-                    if len(row) < 12:  # Ensure we have the minimum required columns
+                    if len(row) < 12:
                         print(f"Warning: Skipping malformed row {row_num}: {row}")
                         continue
                     
@@ -86,7 +69,7 @@ class BikeCSVInputStream(InputStream):
             self.close()
     
     def _create_test_data(self):
-        """Creates synthetic test data for bike pattern validation."""
+        # Creates synthetic test data for bike pattern validation.
         base_time = datetime(2018, 4, 27, 8, 0, 0)
         
         # Valid Pattern 1: Bike 100 - chained trips to station 426 (WITHIN 1 HOUR)
@@ -107,14 +90,14 @@ class BikeCSVInputStream(InputStream):
         # Invalid Pattern 3: Different bikes
         print("✗ Invalid: Different bikes (300 → 400)")
         trips3 = [
-            self._create_trip(base_time, 70, 80, 700, 800, 300),   # bike 300 - MOVED to avoid overlap
-            self._create_trip(base_time, 85, 95, 800, 462, 400)   # bike 400 (different!)
+            self._create_trip(base_time, 70, 80, 700, 800, 300),   # bike 300 
+            self._create_trip(base_time, 85, 95, 800, 462, 400)   # bike 400
         ]
         
         # Invalid Pattern 4: Not chained
         print("✗ Invalid: Gap in stations (950 ≠ 1000)")
         trips4 = [
-            self._create_trip(base_time, 100, 110, 900, 950, 500),  # 900→950 - MOVED to avoid overlap
+            self._create_trip(base_time, 100, 110, 900, 950, 500),  # 900→950
             self._create_trip(base_time, 115, 125, 1000, 426, 500)  # 1000→426 (not chained!)
         ]
         
@@ -140,7 +123,6 @@ class BikeCSVInputStream(InputStream):
         print(f"\nTotal trips: {len(all_trips)}")
     
     def _create_trip(self, base_time, start_min, end_min, start_station, end_station, bike_id):
-        """Create a bike trip CSV line."""
         start_time = base_time + timedelta(minutes=start_min)
         end_time = base_time + timedelta(minutes=end_min)
         duration = (end_time - start_time).total_seconds()
@@ -176,7 +158,7 @@ class TimingBikeInputStream(BikeCSVInputStream):
         self.burst_every = burst_every
         self.burst_sleep_ms = burst_sleep_ms
         self.shed_mode = shed_mode
-        self.overload_detector = None  # Shared reference set by runner when load shedding is active
+        self.overload_detector = None  
         self._pattern_config: Optional['BikeHotPathPatternConfig'] = None
         self._utility_scorer = BikeEventUtilityScorer(target_stations=DEFAULT_TARGET_STATIONS)
         self.dropped_events = 0
@@ -255,7 +237,6 @@ class TimingBikeInputStream(BikeCSVInputStream):
 
 
     def __iter__(self):
-        """Iterate through events while optionally measuring timing."""
         if self.enable_timing:
             if self.system_start_time is None:
                 self.system_start_time = time.perf_counter()
@@ -379,7 +360,7 @@ class TimingBikeInputStream(BikeCSVInputStream):
                     'timestamp': datetime.now()
                 })
                 
-                # Extract info from event data and store processing time by event key
+                # Extract info from event data and store processing time
                 try:
                     bike_id = payload.get('bike_id') or "Unknown"
                     start_station = payload.get('start_station')
@@ -412,19 +393,9 @@ class TimingBikeInputStream(BikeCSVInputStream):
 
 
 class TimingBikeOutputStream(FileOutputStream):
-    """
-    Output stream that tracks when matches are found and calculates processing delays.
-    Compatible with file output while adding timing analysis.
-    """
+
     def __init__(self, input_stream, base_path=None, file_name=None, enable_timing=True):
-        """
-        Initialize the timing output stream.
-        
-        Args:
-            input_stream: Reference to input stream for timing data
-            file_output_stream: Optional file output stream for writing results
-            enable_timing: Whether to enable timing measurements
-        """
+
         super().__init__(base_path=base_path, file_name=file_name)
         self.matches = []
         self.match_start_time = None
@@ -440,7 +411,6 @@ class TimingBikeOutputStream(FileOutputStream):
 
 
     def add_item(self, item):
-        """Add a pattern match with timing analysis."""
         super().add_item(item)
         self._increment_counter('matches_completed')
 
@@ -535,7 +505,6 @@ class TimingBikeOutputStream(FileOutputStream):
         })
     
     def close(self):
-        """Close the output stream and any file outputs."""
         super().close()
 
         if self.enable_timing and self.matches:
@@ -552,7 +521,7 @@ class TimingBikeOutputStream(FileOutputStream):
             latency_file.close()
 
 
-        # Print timing summary if enabled
+        # Print timing summary
         if self.enable_timing and self.matches:
             delays = [m['match_processing_delay_ms'] for m in self.matches if m['match_processing_delay_ms'] > 0]
             if delays:

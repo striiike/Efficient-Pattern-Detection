@@ -9,7 +9,7 @@ Group 7 — Baiyan Che, Amirreza Jafariandehkordi
 
 This project implements efficient pattern detection over streaming data using a SASE-style complex event processing (CEP) engine with load shedding capabilities.
 
-### Pattern Definition (SASE-style)
+### Pattern Definition
 
 ```
 PATTERN SEQ (BikeTrip+ a[], BikeTrip b)
@@ -18,10 +18,6 @@ AND a[last].bike = b.bike AND a[i+1].start = a[i].end
 WITHIN 1h
 RETURN (a[1].start, a[i].end, b.end)
 ```
-
-**Robustness enforced in code:**
-- `b.end_time - a[1].start_time ≤ 1h` (and the engine's 1h window)
-- `a[last].end = b.end` (chain condition)
 
 > **Note:** OpenCEP does not expose `RETURN` directly, so we compute the projection triple `(a1_start, last_a_end, b_end)` in the output stream for recall evaluation.
 
@@ -74,7 +70,7 @@ All commands below use 10000 events. The workflow consists of:
 3. **Event-level shedding**: Check latency vs recall trade-off at 10/30/50/70/90% of baseline p50
 4. **Hybrid shedding**: Show state-aware shedding (event-drop + dynamic Kleene cap shrink)
 5. **Burst simulation**: Validate overload detection under periodic stalls
-6. **(Optional) Sweep runner**: One-shot sweep with outputs under `bike/test_output/sweeps/`
+6. **Sweep runner**: One-shot sweep with outputs under `bike/test_output/sweeps/`
 
 ---
 
@@ -223,7 +219,7 @@ python RunBikeCSV.py --shed --shed-mode event \
 
 ---
 
-### Step 6: One-Shot Sweep (Optional)
+### Step 6: One-Shot Sweep
 
 Run a baseline and sweep 10/30/50/70/90% automatically with outputs in a dedicated directory.
 
@@ -241,17 +237,8 @@ python Sweeps.py \
 ---
 
 
-## Tips & Notes
+## Notes
 
-### Reproducibility
-If you enable shedding, consider seeding Python's RNG in the runner for consistent recall.
-
-### Environment Variable Overrides
-You can pass parameters via environment variables:
-- `BIKE_BASE_DROP_PROB`
-- `BIKE_SLEEP_MS`
-- `BIKE_BURST_EVERY`
-- `BIKE_BURST_SLEEP_MS`
 
 ### Output Artifacts
 

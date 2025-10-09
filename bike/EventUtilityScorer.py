@@ -1,10 +1,3 @@
-"""
-Utility-based scoring for bike trip events used by the load shedding logic.
-
-The scorer tracks lightweight per-bike state so that the input stream can
-prioritize events that are likely to contribute to hot-path matches.
-"""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,7 +7,6 @@ from typing import Dict, Optional, Sequence, Tuple
 
 @dataclass
 class _SequenceState:
-    """Minimal state for the most recent chain observed for a bike."""
 
     first_start: datetime
     last_end: datetime
@@ -24,7 +16,7 @@ class _SequenceState:
 
 
 class BikeEventUtilityScorer:
-    """Assigns an importance score to events for state-aware load shedding."""
+    # Assigns an importance score to events for load shedding.
 
     __slots__ = ("_active_window", "_by_bike", "_target_stations")
 
@@ -38,11 +30,10 @@ class BikeEventUtilityScorer:
         self._by_bike: Dict[str, _SequenceState] = {}
 
     def update_targets(self, target_stations: Sequence[int]) -> None:
-        """Refresh the configured target stations."""
         self._target_stations = {int(station) for station in target_stations}
 
     def update_window(self, active_window: timedelta) -> None:
-        """Refresh the active window that bounds sequence relevance."""
+        # Refresh the active window that bounds sequence relevance.
         self._active_window = active_window
 
     def score_event(
@@ -53,14 +44,12 @@ class BikeEventUtilityScorer:
         start_time: Optional[datetime],
         end_time: Optional[datetime],
     ) -> Tuple[float, str]:
-        """
-        Compute a score in [0, 1] alongside a coarse label describing priority.
-        """
+
         if bike_id is None or start_time is None:
             return 0.5, "supporting"
 
         self._prune_expired(start_time)
-        score = 0.05  # minimal utility floor
+        score = 0.05  # Base score 
 
         state = self._by_bike.get(bike_id)
         if state is not None:
@@ -71,7 +60,6 @@ class BikeEventUtilityScorer:
                 and start_station == state.last_end_station
                 and start_time - state.last_end <= self._active_window
             ):
-                # Likely continuation of an active chain
                 score += 0.35
             elif (
                 state.first_start is not None
@@ -84,7 +72,6 @@ class BikeEventUtilityScorer:
         if end_station is not None and end_station in self._target_stations:
             score += 0.3
 
-        # Favor short turnaround trips arriving quickly after departure.
         if (
             end_time is not None
             and start_time is not None
@@ -110,7 +97,6 @@ class BikeEventUtilityScorer:
         end_time: Optional[datetime],
         accepted: bool,
     ) -> None:
-        """Record the outcome of an event so future scoring reflects engine state."""
         if bike_id is None or start_time is None:
             return
         reference_time = end_time or start_time
@@ -142,7 +128,6 @@ class BikeEventUtilityScorer:
             )
 
     def _prune_expired(self, current_time: datetime) -> None:
-        """Drop bike sequences that aged past the active window."""
         cutoff = current_time - self._active_window
         stale = [
             bike

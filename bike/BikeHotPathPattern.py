@@ -1,15 +1,3 @@
-"""
-Bike Hot Path Pattern Detection Module
-
-Implements the complete bike trip hot path detection pattern:
-PATTERN SEQ (BikeTrip+ a[], BikeTrip b)
-WHERE a[i+1].bike = a[i].bike AND b.end in {426,3002,462}
-AND a[last].bike = b.bike AND a[i+1].start = a[i].end
-WITHIN 1h
-RETURN (a[1].start, a[i].end, b.end)
-
-"""
-
 from datetime import timedelta, datetime
 from base.Pattern import Pattern
 from base.PatternStructure import SeqOperator, PrimitiveEventStructure, KleeneClosureOperator
@@ -23,7 +11,6 @@ DEFAULT_TARGET_STATIONS = {426, 3002, 462}
 
 
 class BikeHotPathPatternConfig:
-    """Mutable configuration for dynamic hot path parameters."""
 
     def __init__(
         self,
@@ -57,22 +44,11 @@ class BikeHotPathPatternConfig:
         self._kleene_operator.max_size = value
 
     def reset(self) -> None:
-        """Restore the Kleene cap to its initial value."""
         self.max_kleene_size = self.initial_max_kleene_size
 
 
 def create_bike_hot_path_pattern(pattern_id=1, target_stations=None, time_window_hours=1, max_kleene_size=3) -> Tuple[Pattern, BikeHotPathPatternConfig]:
-    """
-    Create the bike hot path detection pattern.
-    
-    Args:
-        pattern_id: Unique identifier for the pattern
-        target_stations: Set of target station IDs (defaults to {426, 3002, 462})
-        time_window_hours: Time window in hours (default: 1)
-    
-    Returns:
-        Tuple[Pattern, BikeHotPathPatternConfig]: The configured pattern and a mutable config
-    """
+
     if target_stations is None:
         target_stations = DEFAULT_TARGET_STATIONS
     
@@ -134,7 +110,7 @@ def create_bike_hot_path_pattern(pattern_id=1, target_stations=None, time_window
     )
     conditions.append(chained_to_b)
     
-    # Condition 5: EXPLICIT TIME CONSTRAINT - total sequence time <= 1 hour
+    # Condition 5: total sequence time <= 1 hour
     # This ensures the entire sequence from first trip start to last trip end is within time window
     def time_constraint_check(start_events, end_event):
         if not start_events:
@@ -184,20 +160,7 @@ def create_bike_hot_path_pattern(pattern_id=1, target_stations=None, time_window
 
 
 def create_fixed_length_pattern(pattern_id=2, target_stations=None, sequence_length=3):
-    """
-    Create a fixed-length bike pattern for cleaner results.
-    
-    PATTERN SEQ(BikeTrip a1, BikeTrip a2, ..., BikeTrip b)
-    WHERE ai.bike = ai+1.bike AND ai.end = ai+1.start AND b.end in target_stations
-    
-    Args:
-        pattern_id: Unique identifier for the pattern
-        target_stations: Set of target station IDs
-        sequence_length: Number of trips in the sequence (default: 3)
-    
-    Returns:
-        Pattern: The configured fixed-length pattern
-    """
+
     if target_stations is None:
         target_stations = {426, 3002, 462}
     
@@ -257,12 +220,7 @@ def create_fixed_length_pattern(pattern_id=2, target_stations=None, sequence_len
 
 
 def get_pattern_info():
-    """
-    Get information about the available patterns.
-    
-    Returns:
-        dict: Information about pattern types and their characteristics
-    """
+
     return {
         "kleene_pattern": {
             "name": "Bike Hot Path (Kleene Closure)",

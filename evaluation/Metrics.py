@@ -1,5 +1,3 @@
-"""Utilities for recording latency stats, counters, and summarising runs."""
-
 import csv
 import os
 import statistics
@@ -7,7 +5,6 @@ from typing import Iterable, List, Mapping, Any
 
 
 def write_latency_csv(path: str, delays_ms: Iterable[float]) -> None:
-    """Persist a list of latency samples (ms) to a single-column CSV."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as csv_file:
         writer = csv.writer(csv_file)
@@ -17,7 +14,7 @@ def write_latency_csv(path: str, delays_ms: Iterable[float]) -> None:
 
 
 def summary(delays_ms: List[float]) -> dict:
-    """Calculate basic descriptive stats for latency samples."""
+    # Calculate basic descriptive stats for latency samples.
     samples = list(delays_ms)
     if not samples:
         return {}
@@ -40,7 +37,6 @@ def summary(delays_ms: List[float]) -> dict:
 
 
 def write_counters_csv(path: str, counters: Mapping[str, Any]) -> None:
-    """Write counter values to a CSV file with columns name,value."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as csv_file:
         writer = csv.writer(csv_file)
@@ -50,5 +46,5 @@ def write_counters_csv(path: str, counters: Mapping[str, Any]) -> None:
 
 
 def format_counters(counters: Mapping[str, Any]) -> str:
-    """Return a human-readable string for counter values."""
+    # Return a human-readable string for counter values.
     return ", ".join(f"{key}: {counters[key]}" for key in sorted(counters))

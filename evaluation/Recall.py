@@ -1,5 +1,3 @@
-"""Helpers for computing recall against a baseline set of match projections."""
-
 import csv
 import os
 from typing import Iterable, Set, Tuple, Dict
@@ -8,10 +6,7 @@ Projection = Tuple[int, int, int]
 
 
 def write_projection_csv(path: str, projections: Iterable[Projection]) -> None:
-    """Persist projection rows to CSV with a standard header.
 
-    Note: This preserves duplicates and ordering as provided by the caller.
-    """
     directory = os.path.dirname(path)
     if directory:
         os.makedirs(directory, exist_ok=True)
@@ -24,7 +19,6 @@ def write_projection_csv(path: str, projections: Iterable[Projection]) -> None:
 
 
 def read_projection_set(path: str) -> Set[Projection]:
-    """Load projections from CSV produced by `write_projection_csv`."""
     projections: Set[Projection] = set()
     with open(path, "r", encoding="utf-8") as csv_file:
         reader = csv.reader(csv_file)
@@ -40,10 +34,7 @@ def read_projection_set(path: str) -> Set[Projection]:
 
 
 def read_projection_counts(path: str) -> Dict[Projection, int]:
-    """Load projections from CSV as a multiset (counts per triple), preserving duplicates.
 
-    Returns a dict mapping Projection -> occurrence count.
-    """
     counts: Dict[Projection, int] = {}
     with open(path, "r", encoding="utf-8") as csv_file:
         reader = csv.reader(csv_file)
@@ -60,12 +51,7 @@ def read_projection_counts(path: str) -> Dict[Projection, int]:
 
 
 def recall(baseline_csv: str, shedding_csv: str) -> float:
-    """Compute recall between a baseline and shedding projection CSV using multiset semantics.
-
-    - Baseline and shedding files may contain duplicate projection rows.
-    - Recall is computed as the sum over triples of min(baseline_count, shedding_count)
-      divided by the total number of baseline rows.
-    """
+    # Compute recall of shedding run against baseline run.
     baseline_counts = read_projection_counts(baseline_csv)
     shedding_counts = read_projection_counts(shedding_csv)
 

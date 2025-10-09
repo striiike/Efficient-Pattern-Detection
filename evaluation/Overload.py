@@ -1,12 +1,9 @@
-"""Helpers for detecting overload conditions based on match and event processing latency."""
-
 import time
 from collections import deque
 from typing import Deque, Optional
 
 
 class OverloadEMA:
-    """Track exponential moving averages for match and event latencies."""
 
     def __init__(self, alpha: float = 0.2, target_ms: float = 50.0) -> None:
         if not 0.0 < alpha <= 1.0:
@@ -60,7 +57,6 @@ class OverloadEMA:
 
 
 class OverloadDetector:
-    """Track latency bursts using an exponential moving average across matches and events."""
 
     def __init__(
         self,
@@ -92,7 +88,6 @@ class OverloadDetector:
         self._last_latency_ms: Optional[float] = None
 
     def note_latency(self, detection_latency_ms: float) -> None:
-        """Backward compatible alias for match latency updates."""
         self.note_match_latency(detection_latency_ms)
 
     def note_match_latency(self, detection_latency_ms: float) -> None:
@@ -110,7 +105,6 @@ class OverloadDetector:
         self._evaluate_state()
 
     def overshoot(self) -> float:
-        """Expose the current overshoot ratio relative to the target latency."""
         return self.ema.overshoot()
 
     def _evaluate_state(self) -> None:

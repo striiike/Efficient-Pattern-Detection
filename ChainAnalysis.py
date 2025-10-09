@@ -1,9 +1,3 @@
-#!/usr/bin/env python3
-"""
-Complete chain trips analysis pipeline.
-From original data to top 10 hot end stations analysis.
-"""
-
 import os
 import sys
 import pandas as pd
@@ -17,7 +11,7 @@ sys.path.append(os.path.dirname(__file__))
 from bike.BikeData import BikeDataFormatter
 
 def find_hot_end_stations(csv_file, top_n=30, sample_size=50000):
-    """Find the most popular end stations from a sample of the data."""
+    # Find the most popular end stations.
     data_formatter = BikeDataFormatter()
     end_stations = Counter()
     
@@ -46,7 +40,7 @@ def find_hot_end_stations(csv_file, top_n=30, sample_size=50000):
     return hot_stations
 
 def find_chain_trip_lines(csv_file, hot_end_stations, time_window_hours=2, max_chain_hours=1.0):
-    """Find all trip lines that form continuous chains ending at hot stations."""
+    # Find all trip lines that form continuous chains ending at hot stations.
     data_formatter = BikeDataFormatter()
     trips = []
     
@@ -120,7 +114,7 @@ def extract_chain_data(csv_file, chain_line_numbers, header, output_file, sorted
     extracted_data = []
     
     with open(csv_file, 'r') as infile:
-        infile.readline()  # Skip header
+        infile.readline() 
         
         for line_num, line in enumerate(infile, 1):
             if line_num in chain_line_numbers:

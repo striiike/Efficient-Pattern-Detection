@@ -1,5 +1,3 @@
-"""Latency-bound recall sweeps for bike pattern shedding."""
-
 import argparse
 import time
 from pathlib import Path
@@ -148,13 +146,13 @@ def main() -> None:
         burst_sleep_ms=args.burst_sleep_ms,
     )
 
-    baseline_stats: Dict[str, float] = baseline_result["stats"]  # type: ignore[assignment]
+    baseline_stats: Dict[str, float] = baseline_result["stats"]  
     if not baseline_stats:
         print("No latency samples were recorded in the baseline run. Aborting sweep.")
         return
 
     baseline_p50 = baseline_stats.get("p50", 0.0)
-    baseline_projections: Set[Projection] = baseline_result["projections"]  # type: ignore[assignment]
+    baseline_projections: Set[Projection] = baseline_result["projections"]  
 
     print("\nBaseline summary:")
     print(f"  Events:     {baseline_result['events']}")
@@ -187,10 +185,10 @@ def main() -> None:
             burst_sleep_ms=args.burst_sleep_ms,
         )
 
-        stats: Dict[str, float] = result["stats"]  # type: ignore[assignment]
+        stats: Dict[str, float] = result["stats"] 
         p50 = stats.get("p50", 0.0)
         p95 = stats.get("p95", 0.0)
-        projections: Set[Projection] = result["projections"]  # type: ignore[assignment]
+        projections: Set[Projection] = result["projections"]  
         recall = 1.0 if baseline_count == 0 else len(baseline_projections & projections) / baseline_count
         rows.append((cap * 100.0, target_ms, p50, p95, recall))
 

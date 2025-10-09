@@ -4,9 +4,7 @@ import csv
 
 
 class BikeEventTypeClassifier(EventTypeClassifier):
-    """
-    Assigns a single event type to all bike trip events
-    """
+
     BIKE_TRIP_TYPE = "BikeTrip"
 
     def get_event_type(self, event_payload: dict):
@@ -14,20 +12,12 @@ class BikeEventTypeClassifier(EventTypeClassifier):
 
 
 class BikeDataFormatter(DataFormatter):
-    """
-    A data formatter implementation for the CSV-based Citibike data.
-    Maps CSV rows to BikeTrip events with the required attributes for pattern matching.
-    """
+
     def __init__(self, event_type_classifier: EventTypeClassifier = BikeEventTypeClassifier()):
         super().__init__(event_type_classifier)
 
     def parse_event(self, raw_data: str):
-        """
-        Parses a CSV row into a BikeTrip event.
-        Expected CSV format: tripduration,starttime,stoptime,start station id,start station name,
-        start station latitude,start station longitude,end station id,end station name,
-        end station latitude,end station longitude,bikeid,usertype,birth year,gender
-        """
+
         # Handle both comma-separated strings and already parsed lists
         if isinstance(raw_data, str):
             # Use csv.reader to properly handle CSV format
@@ -35,7 +25,7 @@ class BikeDataFormatter(DataFormatter):
         else:
             row = raw_data
             
-        if len(row) < 12:  # Ensure we have at least the essential fields
+        if len(row) < 12:  # Ensure we have the essential fields
             raise ValueError(f"Invalid CSV row: expected at least 12 columns, got {len(row)}")
             
         try:
@@ -62,9 +52,7 @@ class BikeDataFormatter(DataFormatter):
         return bike_payload
 
     def get_event_timestamp(self, event_payload: dict):
-        """
-        Parse the starttime timestamp. Format: 2018-04-27 07:26:51.6800
-        """
+
         timestamp_str = event_payload["starttime"]
         try:
             # Handle microseconds if present

@@ -243,7 +243,7 @@ def main() -> None:
     else:
         print("Latency file not created (it appears only when at least one match is found).")
 
-    print("\n✅ Done.")
+    print("\nDone.")
     print("Open:")
     print(f" - {matches_path}")
     print(f" - {latency_path} (created only if there were matches)")

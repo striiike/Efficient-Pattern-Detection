@@ -70,7 +70,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    # Parse target stations if provided
     target_stations = {426, 3002, 462}
     
     from ChainAnalysis import analyze_top_stations
@@ -217,7 +216,7 @@ def main() -> None:
     print("\nCounters:")
     print("  " + format_counters({key: run_counters.get(key, 0) for key in COUNTER_KEYS}))
 
-    print("\n✅ Done.")
+    print("\nDone.")
     print("Open:")
     print(f" - {OUTPUT_DIR / f'matches_{OUTPUT_NAME}.txt'}")
     print(f" - {OUTPUT_DIR / f'latencies_{OUTPUT_NAME}.txt'}")
