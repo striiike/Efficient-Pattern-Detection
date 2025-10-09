@@ -2,6 +2,8 @@ import os
 import sys
 import pandas as pd
 import time
+import random
+import numpy as np
 from datetime import datetime, timedelta
 from collections import Counter, defaultdict
 import csv
@@ -149,6 +151,10 @@ def extract_chain_data(csv_file, chain_line_numbers, header, output_file, sorted
 
 def analyze_top_stations(sorted_file, limit=1000, top_n=10):
     """Analyze top stations from sorted data."""
+    # if sorted_file is ends with '_noisy.csv', use the original data for analysis
+    if sorted_file.endswith('_noisy.csv'):
+        sorted_file = sorted_file.replace('_noisy.csv', '.csv')
+
     df = pd.read_csv(sorted_file)
     
     # Use first 1000 records
@@ -200,10 +206,68 @@ def analyze_top_stations(sorted_file, limit=1000, top_n=10):
     results.sort(key=lambda x: x['chains'], reverse=True)
     return results[:top_n]
 
+def get_noise_from_citibike(noise_count):
+    citibike_file = 'data/201804-citibike-tripdata_2.csv'
+    noise_events = []
+    
+    with open(citibike_file, 'r') as f:
+        f.readline()  # Skip header
+        lines = list(f)
+        
+    selected_lines = random.sample(lines, min(noise_count, len(lines)))
+    
+    for line in selected_lines:
+        noise_events.append(line.strip())
+    
+    return noise_events
+
+def add_noise_to_data(input_file, output_file, noise_ratio=0.01):
+    data_formatter = BikeDataFormatter()
+    original_events = []
+    
+    with open(input_file, 'r') as f:
+        header = f.readline()
+        for line in f:
+            line = line.strip()
+            if line:
+                try:
+                    event = data_formatter.parse_event(line)
+                    original_events.append((event['starttime'], line))
+                except:
+                    continue
+    
+    if not original_events:
+        return
+    
+    original_count = len(original_events)
+    noise_count = int(original_count * noise_ratio / (1 - noise_ratio))
+    
+    noise_lines = get_noise_from_citibike(noise_count)
+    noise_events = []
+    
+    for line in noise_lines:
+        try:
+            event = data_formatter.parse_event(line)
+            noise_events.append((event['starttime'], line))
+        except:
+            continue
+    
+    all_events = original_events + noise_events
+    all_events.sort(key=lambda x: x[0])
+    
+    with open(output_file, 'w', newline='', encoding='utf-8') as f:
+        f.write(header)
+        for _, event_line in all_events:
+            f.write(event_line + '\n')
+    
+    return output_file
+
 if __name__ == "__main__":
     INPUT_FILE = 'data/201804-citibike-tripdata_2.csv'
     OUTPUT_ORIGINAL = 'data/chain_trips_subset_1h.csv'
     OUTPUT_SORTED = 'data/chain_trips_subset_1h_sorted.csv'
+    OUTPUT_ORIGINAL_NOISY = 'data/chain_trips_subset_1h_noisy.csv'
+    OUTPUT_SORTED_NOISY = 'data/chain_trips_subset_1h_sorted_noisy.csv'
 
     if not os.path.exists(OUTPUT_ORIGINAL) and not os.path.exists(OUTPUT_SORTED):
         hot_end_stations = find_hot_end_stations(INPUT_FILE, top_n=30)
@@ -211,14 +275,16 @@ if __name__ == "__main__":
             INPUT_FILE, hot_end_stations, time_window_hours=2.0, max_chain_hours=1.0
         )
 
-        extract_chain_data(
-            INPUT_FILE, chain_line_numbers, header, OUTPUT_ORIGINAL, sorted_output=False
-        )
-        extract_chain_data(
-            INPUT_FILE, chain_line_numbers, header, OUTPUT_SORTED, sorted_output=True
-        )
-
-    top_stations = analyze_top_stations(OUTPUT_SORTED, limit=1000, top_n=10)
-    top_stations = { int(station['station']) for station in top_stations }
+        extract_chain_data(INPUT_FILE, chain_line_numbers, header, OUTPUT_ORIGINAL, sorted_output=False)
+        extract_chain_data(INPUT_FILE, chain_line_numbers, header, OUTPUT_SORTED, sorted_output=True)
     
-    print(top_stations)
+    if os.path.exists(OUTPUT_ORIGINAL):
+        add_noise_to_data(OUTPUT_ORIGINAL, OUTPUT_ORIGINAL_NOISY, noise_ratio=0.75)
+    
+    if os.path.exists(OUTPUT_SORTED):
+        add_noise_to_data(OUTPUT_SORTED, OUTPUT_SORTED_NOISY, noise_ratio=0.75)
+
+    if os.path.exists(OUTPUT_SORTED):
+        top_stations = analyze_top_stations(OUTPUT_SORTED, limit=1000, top_n=10)
+        top_stations_set = { int(station['station']) for station in top_stations }
+        print(f"Top 10 hot end stations: {top_stations_set}")

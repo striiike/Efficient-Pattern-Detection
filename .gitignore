@@ -6,3 +6,5 @@ test_output/
 venv/
 .vscode/
 .idea/
+
+bike/temp/
